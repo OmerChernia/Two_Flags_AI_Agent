@@ -5,9 +5,10 @@ import threading
 import tkinter as tk
 from gui import PawnChessGUI
 
-# Global board setup and starting side. These can be updated by the GUI.
-board_setup = "Setup Wa2 Wb2 Wc2 Wd2 We2 Wf2 Wg2 Wh2 Ba7 Bb7 Bc7 Bd7 Be7 Bf7 Bg7 Bh7"
-starting_side = "White"  # Default starting side.
+# Global default board setup.
+default_setup = "Setup Wa2 Wb2 Wc2 Wd2 We2 Wf2 Wg2 Wh2 Ba7 Bb7 Bc7 Bd7 Be7 Bf7 Bg7 Bh7"
+board_setup = default_setup
+starting_side = "White"  # Define a default starting side
 
 def update_setup(new_setup, new_starting_side):
     """

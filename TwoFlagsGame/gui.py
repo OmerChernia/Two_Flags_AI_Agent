@@ -3,6 +3,7 @@ from tkinter import ttk, messagebox
 import socket
 import threading
 import time
+from client import generate_all_legal_moves
 
 # ----------------------
 # Helper Functions
@@ -470,6 +471,45 @@ class PawnChessGUI:
         self.update_board_state(msg)
         self.status_label.config(text=f"Move received: {msg}")
         self.draw_board()
+    
+        # Check for win conditions after updating the board.
+        winner = self.check_win_conditions()
+        if winner:
+            self.status_label.config(text=f"Game Over: {winner}")
+            # Disable further moves.
+            self.my_turn = False
+            
+    def check_win_conditions(self):
+        """
+        Check if a winning condition has been reached.
+        White wins if a white pawn reaches row 0.
+        Black wins if a black pawn reaches row 7.
+        Also checks if one side has no pawns left or no legal moves.
+        """
+        # Check promotion.
+        for col in range(8):
+            if self.white_bitmap[0][col]:
+                return "White wins"
+            if self.black_bitmap[7][col]:
+                return "Black wins"
+        
+        # Check piece counts.
+        white_count = sum(1 for row in self.white_bitmap for cell in row if cell)
+        black_count = sum(1 for row in self.black_bitmap for cell in row if cell)
+        if black_count == 0:
+            return "White wins"
+        if white_count == 0:
+            return "Black wins"
+        
+        # Check if either side has no legal moves.
+        white_moves = generate_all_legal_moves("White", self.white_bitmap, self.black_bitmap)
+        black_moves = generate_all_legal_moves("Black", self.black_bitmap, self.white_bitmap)
+        if not white_moves:
+            return "Black wins"
+        if not black_moves:
+            return "White wins"
+        
+        return None
         
     def on_spectator_message(self, msg):
         # For spectator mode, schedule the update in the main GUI thread.
