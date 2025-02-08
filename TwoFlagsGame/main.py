@@ -1,5 +1,6 @@
 def main():
     print("Welcome to Two Flags!")
+    print("To run the server, execute: python server.py")
     print("To run a human client, execute: python client.py [host] [port]")
     print("To run a random agent, execute: python random_agent.py [host] [port]")
     # TODO: Initialize the game and start processing moves
