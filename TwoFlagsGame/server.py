@@ -61,13 +61,17 @@ def start_server():
     s_file1 = conn1.makefile("r")
 
     # Check if a custom board setup is being sent.
-    first_msg = recv_msg(s_file1, stats)
+    ready, _, _ = select.select([conn1], [], [], 0.5)
+    if ready:
+        first_msg = recv_msg(s_file1, stats)
+    else:
+        first_msg = ""
     if first_msg.startswith("Setup "):  # Custom board message detected.
-        update_setup(first_msg, "White")  # For simplicity, we use White as the starting side.
+        update_setup(first_msg, "White")  # Update the global board_setup.
         send_msg(conn1, "SETUP-ACK", stats)
         print("Custom board setup received from connection 1.")
-    else:
-        send_msg(conn1, "OK", stats)
+    # If no custom setup is provided, do nothing.
+    # (Do NOT send an "OK" here)
 
     # --- Accept second player connection ---
     print("Waiting for game connection 2...")

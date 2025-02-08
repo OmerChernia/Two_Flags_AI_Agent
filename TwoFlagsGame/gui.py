@@ -171,7 +171,6 @@ class PawnChessGUI:
         host = self.host.get().strip()
         if mode == "Spectator":
             spec_port = self.spec_port.get()
-            # Connect as spectator (existing behavior)
             try:
                 self.spectator_client = SpectatorClient(host, spec_port, self.on_spectator_message)
                 self.spectator_client.start()
@@ -181,7 +180,11 @@ class PawnChessGUI:
             except Exception as e:
                 messagebox.showerror("Connection Error", f"Could not connect as spectator: {e}")
         elif mode == "Human":
-            game_port = self.game_port.get()
+            try:
+                game_port = int(self.game_port.get())
+            except ValueError:
+                messagebox.showerror("Invalid Port", "Game port must be an integer.")
+                return
             self.connect_as_human(host, game_port)
 
     def connect_as_human(self, host, game_port):
@@ -191,7 +194,7 @@ class PawnChessGUI:
             self.sock.connect((host, game_port))
             self.conn_file = self.sock.makefile("r")
             
-            # --- Use custom board setup if it was loaded via the "Load Custom Board" button ---
+            # --- Use custom board setup if it was loaded ---
             if self.use_custom_board:
                 send_msg(self.sock, self.custom_setup_string, self.session_stats)
                 ack = recv_msg(self.conn_file, self.session_stats)
@@ -200,10 +203,10 @@ class PawnChessGUI:
                 else:
                     print("Custom board setup sent and acknowledged by server.")
             else:
-                # Normal handshake starts.
-                send_msg(self.sock, "Connected to the server!", self.session_stats)
-            
-            # Continue with handshake...
+                # Remove the incorrect send. Do nothing here.
+                pass
+
+            # Continue with handshake sequence similar to the console client.
             welcome = recv_msg(self.conn_file, self.session_stats)
             print("Server says:", welcome)
             send_msg(self.sock, "OK", self.session_stats)
