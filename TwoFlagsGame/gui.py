@@ -107,46 +107,64 @@ class PawnChessGUI:
         self.host = tk.StringVar(value="127.0.0.1")
         tk.Entry(self.config_frame, textvariable=self.host).grid(row=0, column=1, padx=5, pady=5)
         
-        # For Spectator mode connection
+        # Spectator mode connection.
         tk.Label(self.config_frame, text="Spectator Port:").grid(row=1, column=0, padx=5, pady=5)
         self.spec_port = tk.IntVar(value=10000)
         tk.Entry(self.config_frame, textvariable=self.spec_port).grid(row=1, column=1, padx=5, pady=5)
         
-        # Mode selection: Spectator or Human
+        # Mode selection: Spectator or Human.
         tk.Label(self.config_frame, text="Mode:").grid(row=2, column=0, padx=5, pady=5)
         self.mode = tk.StringVar(value="Spectator")
         tk.Radiobutton(self.config_frame, text="Spectator", variable=self.mode, value="Spectator").grid(row=2, column=1, padx=5, pady=5, sticky="w")
         tk.Radiobutton(self.config_frame, text="Human", variable=self.mode, value="Human").grid(row=2, column=2, padx=5, pady=5, sticky="w")
         
-        # For Human mode connection (game port)
+        # For Human mode connection (game port).
         tk.Label(self.config_frame, text="Game Port (if Human):").grid(row=3, column=0, padx=5, pady=5)
         self.game_port = tk.IntVar(value=9999)
         tk.Entry(self.config_frame, textvariable=self.game_port).grid(row=3, column=1, padx=5, pady=5)
         
+        # Connect button.
         tk.Button(self.config_frame, text="Connect", command=self.connect).grid(row=4, column=0, columnspan=3, pady=10)
+        
+        # --- Custom Board Setup Panel ---
+        # Button to start board editing.
+        tk.Button(self.config_frame, text="Custom Board Setup", command=self.edit_board_setup)\
+            .grid(row=5, column=0, columnspan=3, pady=10)
+        # Button to load the custom board (i.e. mark it for upload).
+        tk.Button(self.config_frame, text="Load Custom Board", command=self.load_custom_board)\
+            .grid(row=7, column=0, columnspan=3, pady=10)
+        tk.Label(self.config_frame, text="Starting Side:").grid(row=6, column=0, padx=5, pady=5)
+        self.starting_side = tk.StringVar(value="White")
+        tk.Radiobutton(self.config_frame, text="White", variable=self.starting_side, value="White")\
+            .grid(row=6, column=1, padx=5, pady=5)
+        tk.Radiobutton(self.config_frame, text="Black", variable=self.starting_side, value="Black")\
+            .grid(row=6, column=2, padx=5, pady=5)
+        
         self.config_frame.pack(pady=20)
         
         # --- Game Display Panel ---
         self.game_frame = tk.Frame(self.root)
         self.status_label = tk.Label(self.game_frame, text="Waiting for moves...", font=("Helvetica", 14))
         self.status_label.pack(pady=10)
-        # Increase canvas size to allow for board plus coordinate labels
         self.canvas = tk.Canvas(self.game_frame, width=500, height=500)
         self.canvas.pack(pady=10)
         self.game_frame.pack_forget()
         
-        # Initialize board state.
+        # Flag to indicate whether a custom board has been loaded.
+        self.use_custom_board = False
+        
+        # Initialize board state with default setup.
         self.default_setup = "Setup Wa2 Wb2 Wc2 Wd2 We2 Wf2 Wg2 Wh2 Ba7 Bb7 Bc7 Bd7 Be7 Bf7 Bg7 Bh7"
         self.white_bitmap, self.black_bitmap = initialize_boards(self.default_setup)
         self.draw_board()
         
         # Variables for human move input.
-        self.selected_square = None   # Will store the first click (source square)
-        self.human_mode = False       # True if player is human (not spectating)
-        self.sock = None              # Network socket for human connection
+        self.selected_square = None   # Used for move selection.
+        self.human_mode = False       # True for human play.
+        self.sock = None              # Network socket for human connection.
         self.conn_file = None
         self.session_stats = {"bytes_read": 0, "bytes_written": 0}
-        self.role = None              # Assigned role from the server
+        self.role = None              # Assigned role from the server.
 
     def connect(self):
         mode = self.mode.get()
@@ -172,7 +190,20 @@ class PawnChessGUI:
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.sock.connect((host, game_port))
             self.conn_file = self.sock.makefile("r")
-            # --- Handshake sequence (similar to client.py) ---
+            
+            # --- Use custom board setup if it was loaded via the "Load Custom Board" button ---
+            if self.use_custom_board:
+                send_msg(self.sock, self.custom_setup_string, self.session_stats)
+                ack = recv_msg(self.conn_file, self.session_stats)
+                if ack != "SETUP-ACK":
+                    print("Custom setup acknowledgment not received, got:", ack)
+                else:
+                    print("Custom board setup sent and acknowledged by server.")
+            else:
+                # Normal handshake starts.
+                send_msg(self.sock, "Connected to the server!", self.session_stats)
+            
+            # Continue with handshake...
             welcome = recv_msg(self.conn_file, self.session_stats)
             print("Server says:", welcome)
             send_msg(self.sock, "OK", self.session_stats)
@@ -198,6 +229,7 @@ class PawnChessGUI:
             else:
                 messagebox.showerror("Error", "Role not assigned. Exiting.")
                 return
+
             # Switch to game view.
             self.config_frame.pack_forget()
             self.game_frame.pack(fill="both", expand=True)
@@ -205,9 +237,7 @@ class PawnChessGUI:
                 self.status_label.config(text="Connected as HUMAN (White). Your turn!")
             else:
                 self.status_label.config(text="Connected as HUMAN (Black). Waiting for opponent's move...")
-            # Bind the canvas for move input.
             self.canvas.bind("<Button-1>", self.on_canvas_click)
-            # Start a background thread to listen for server messages.
             threading.Thread(target=self.human_listen_thread, daemon=True).start()
         except Exception as e:
             messagebox.showerror("Connection Error", f"Could not connect as human: {e}")
@@ -427,6 +457,137 @@ class PawnChessGUI:
     def on_spectator_message(self, msg):
         # For spectator mode, schedule the update in the main GUI thread.
         self.root.after(0, self.process_move, msg)
+
+    # --- New Methods for Board Setup Mode ---
+    def set_setup_color(self, color):
+        """Set the pawn color to be used in board setup."""
+        self.setup_color = color
+        if hasattr(self, 'status_label'):
+            self.status_label.config(text=f"Selected Pawn Color for Setup: {color}")
+
+    def edit_board_setup(self):
+        """Enter board setup mode to define a custom board configuration."""
+        # Hide configuration and game view panels.
+        self.config_frame.pack_forget()
+        self.game_frame.pack_forget()
+        # Create a new frame for board setup.
+        self.setup_frame = tk.Frame(self.root)
+        tk.Label(self.setup_frame, text="Board Setup Mode", font=("Helvetica", 16)).pack(pady=10)
+        # Buttons to select pawn color.
+        color_frame = tk.Frame(self.setup_frame)
+        tk.Button(color_frame, text="White Pawn", command=lambda: self.set_setup_color("White"))\
+            .pack(side="left", padx=5)
+        tk.Button(color_frame, text="Black Pawn", command=lambda: self.set_setup_color("Black"))\
+            .pack(side="left", padx=5)
+        tk.Button(color_frame, text="Clear Board", command=self.clear_board_setup)\
+            .pack(side="left", padx=5)
+        color_frame.pack()
+        # Create a new canvas for board setup (do not reuse the game canvas).
+        self.setup_canvas = tk.Canvas(self.setup_frame, width=500, height=500)
+        self.setup_canvas.pack(pady=10)
+        tk.Button(self.setup_frame, text="Finish Setup", command=self.finish_board_setup)\
+            .pack(pady=10)
+        self.setup_frame.pack(pady=20)
+        # Clear board state for custom setup.
+        self.white_bitmap = [[False]*8 for _ in range(8)]
+        self.black_bitmap = [[False]*8 for _ in range(8)]
+        self.draw_setup_board()
+        self.setup_color = "White"
+        # Bind canvas clicks to the board setup handler.
+        self.setup_canvas.bind("<Button-1>", self.on_setup_canvas_click_setup)
+
+    def draw_setup_board(self):
+        """Draw the board on the setup canvas."""
+        self.setup_canvas.delete("all")
+        square_size = 50
+        margin_left = 30
+        margin_top = 30
+        colors = ["#f0d9b5", "#b58863"]
+        for row in range(8):
+            for col in range(8):
+                x0 = margin_left + col * square_size
+                y0 = margin_top + row * square_size
+                x1 = x0 + square_size
+                y1 = y0 + square_size
+                self.setup_canvas.create_rectangle(x0, y0, x1, y1,
+                                                   fill=colors[(row + col) % 2],
+                                                   outline="black")
+                # Draw white pawn with an outline.
+                if self.white_bitmap[row][col]:
+                    self.setup_canvas.create_text(x0 + square_size/2 + 1,
+                                                  y0 + square_size/2 + 1,
+                                                  text="♙", font=("Helvetica", 24),
+                                                  fill="black")
+                    self.setup_canvas.create_text(x0 + square_size/2,
+                                                  y0 + square_size/2,
+                                                  text="♙", font=("Helvetica", 24),
+                                                  fill="white")
+                # Draw black pawn with an outline.
+                if self.black_bitmap[row][col]:
+                    self.setup_canvas.create_text(x0 + square_size/2 + 1,
+                                                  y0 + square_size/2 + 1,
+                                                  text="♟", font=("Helvetica", 24),
+                                                  fill="white")
+                    self.setup_canvas.create_text(x0 + square_size/2,
+                                                  y0 + square_size/2,
+                                                  text="♟", font=("Helvetica", 24),
+                                                  fill="black")
+        # (Optional) You can also add coordinate labels if desired.
+
+    def on_setup_canvas_click_setup(self, event):
+        """Place a pawn on the board during setup according to the selected color."""
+        square_size = 50
+        margin_left = 30
+        margin_top = 30
+        col = (event.x - margin_left) // square_size
+        row = (event.y - margin_top) // square_size
+        if 0 <= row < 8 and 0 <= col < 8:
+            if self.setup_color == "White":
+                self.white_bitmap[row][col] = True
+                self.black_bitmap[row][col] = False
+            elif self.setup_color == "Black":
+                self.black_bitmap[row][col] = True
+                self.white_bitmap[row][col] = False
+            self.draw_setup_board()
+
+    def clear_board_setup(self):
+        """Clear the board in board setup mode."""
+        self.white_bitmap = [[False]*8 for _ in range(8)]
+        self.black_bitmap = [[False]*8 for _ in range(8)]
+        # If the setup canvas exists, redraw the board.
+        if hasattr(self, "setup_canvas"):
+            self.draw_setup_board()
+
+    def finish_board_setup(self):
+        """Generate the Setup string from the board state and return to the configuration panel."""
+        tokens = []
+        for row in range(8):
+            for col in range(8):
+                pos = coord_to_algebraic(row, col)
+                if self.white_bitmap[row][col]:
+                    tokens.append("W" + pos)
+                elif self.black_bitmap[row][col]:
+                    tokens.append("B" + pos)
+        self.custom_setup_string = "Setup " + " ".join(tokens)
+        self.status_label.config(text=f"Custom Setup: {self.custom_setup_string}")
+        # Destroy the setup frame (and its canvas) then show the config panel.
+        self.setup_frame.destroy()
+        self.config_frame.pack(pady=20)
+
+    def load_custom_board(self):
+        """
+        Called when the user clicks the "Load Custom Board" button.
+        It verifies that a custom setup was configured and sets a flag,
+        so that later when connecting the custom board is sent to the server.
+        """
+        if self.custom_setup_string:
+            self.use_custom_board = True
+            messagebox.showinfo("Custom Setup Loaded",
+                                f"Custom board loaded:\n{self.custom_setup_string}")
+            print("Custom board loaded and will be sent during connection.")
+        else:
+            messagebox.showerror("Error",
+                                 "No custom board setup defined. Please edit the board setup first.")
 
 if __name__ == "__main__":
     root = tk.Tk()
