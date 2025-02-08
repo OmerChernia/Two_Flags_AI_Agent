@@ -165,6 +165,8 @@ class PawnChessGUI:
         self.conn_file = None
         self.session_stats = {"bytes_read": 0, "bytes_written": 0}
         self.role = None              # Assigned role from the server.
+        # Flag to track if it is the human player's turn.
+        self.my_turn = False
 
     def connect(self):
         mode = self.mode.get()
@@ -194,7 +196,7 @@ class PawnChessGUI:
             self.sock.connect((host, game_port))
             self.conn_file = self.sock.makefile("r")
             
-            # --- Use custom board setup if it was loaded ---
+            # --- Custom setup sequence (if any) ---
             if self.use_custom_board:
                 send_msg(self.sock, self.custom_setup_string, self.session_stats)
                 ack = recv_msg(self.conn_file, self.session_stats)
@@ -202,11 +204,8 @@ class PawnChessGUI:
                     print("Custom setup acknowledgment not received, got:", ack)
                 else:
                     print("Custom board setup sent and acknowledged by server.")
-            else:
-                # Remove the incorrect send. Do nothing here.
-                pass
 
-            # Continue with handshake sequence similar to the console client.
+            # --- Handshake Sequence ---
             welcome = recv_msg(self.conn_file, self.session_stats)
             print("Server says:", welcome)
             send_msg(self.sock, "OK", self.session_stats)
@@ -233,13 +232,18 @@ class PawnChessGUI:
                 messagebox.showerror("Error", "Role not assigned. Exiting.")
                 return
 
-            # Switch to game view.
+            # Switch the display to game mode.
             self.config_frame.pack_forget()
             self.game_frame.pack(fill="both", expand=True)
+
+            # If white, it's your turn right away. Otherwise, wait.
             if self.role == "White":
+                self.my_turn = True
                 self.status_label.config(text="Connected as HUMAN (White). Your turn!")
             else:
+                self.my_turn = False
                 self.status_label.config(text="Connected as HUMAN (Black). Waiting for opponent's move...")
+
             self.canvas.bind("<Button-1>", self.on_canvas_click)
             threading.Thread(target=self.human_listen_thread, daemon=True).start()
         except Exception as e:
@@ -251,17 +255,16 @@ class PawnChessGUI:
             msg = recv_msg(self.conn_file, self.session_stats)
             if msg:
                 print("Received from server:", msg)
-                # Update the board in the main GUI thread.
                 self.root.after(0, self.process_move, msg)
-                # When it is our turn, update the status label.
-                if ("BEGIN" in msg) or msg.startswith("Role"):
-                    # ignore
+                # Do not change turn on handshake messages.
+                if msg.startswith("BEGIN") or msg.startswith("Role"):
                     pass
+                # When a win message is received, just display it.
                 elif msg.startswith("win:"):
                     self.root.after(0, self.status_label.config, {"text": msg})
-                elif self.role == "Black":
-                    # If Black, once a move arrives, it means it's now our turn.
-                    self.root.after(0, self.status_label.config, {"text": "Your turn!"})
+                else:
+                    # For any opponent move, it is now your turn.
+                    self.root.after(0, self.set_my_turn, True)
             else:
                 time.sleep(0.1)
 
@@ -362,27 +365,38 @@ class PawnChessGUI:
             return False
 
     def on_canvas_click(self, event):
-        # This method is used only in human mode.
-        if not self.human_mode:
+        """
+        Handles the canvas click in human mode.
+        Checks that it is your turn before accepting a move.
+        """
+        # Only process if in human mode and it is currently your turn.
+        if not self.human_mode or not self.my_turn:
+            self.status_label.config(text="Not your turn! Please wait.")
             return
+
         square_size = 50
         margin_left = 30
         margin_top = 30
         col = (event.x - margin_left) // square_size
         row = (event.y - margin_top) // square_size
+
         if 0 <= row < 8 and 0 <= col < 8:
             clicked_square = coord_to_algebraic(row, col)
             if not self.selected_square:
                 self.selected_square = clicked_square
-                self.status_label.config(text=f"Selected source: {clicked_square}. Now select destination.")
+                self.status_label.config(
+                    text=f"Selected source: {clicked_square}. Now select destination."
+                )
             else:
                 move = self.selected_square + clicked_square
                 if self.is_move_legal(move):
                     self.status_label.config(text=f"Sending move: {move}")
                     send_msg(self.sock, move, self.session_stats)
-                    # Immediately update the board for visual feedback.
                     self.update_board_state(move)
                     self.draw_board()
+                    # Disable your turn immediately after sending your move.
+                    self.my_turn = False
+                    self.status_label.config(text="Waiting for opponent's move...")
                 else:
                     self.status_label.config(text=f"Illegal move: {move}")
                 self.selected_square = None
@@ -591,6 +605,11 @@ class PawnChessGUI:
         else:
             messagebox.showerror("Error",
                                  "No custom board setup defined. Please edit the board setup first.")
+
+    def set_my_turn(self, flag):
+        self.my_turn = flag
+        if flag:
+            self.status_label.config(text="Your turn!")
 
 if __name__ == "__main__":
     root = tk.Tk()
