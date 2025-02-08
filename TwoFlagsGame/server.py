@@ -2,140 +2,141 @@ import socket
 import select
 import time
 
-HOST = '127.0.0.1'
-PORT = 9999
-
 def send_msg(conn, msg, stats):
     full_msg = msg + "\n"
     data = full_msg.encode()
-    conn.sendall(data)
-    stats["bytes_written"] += len(data)
+    try:
+        conn.sendall(data)
+        stats["bytes_written"] += len(data)
+    except Exception as e:
+        print("Send error:", e)
 
-def recv_msg(conn, stats):
-    data = conn.recv(1024)
-    if not data:
+def recv_msg(conn_file, stats):
+    try:
+        line = conn_file.readline()
+        if not line:
+            return ""
+        stats["bytes_read"] += len(line)
+        return line.strip()
+    except Exception as e:
+        print("Receive error:", e)
         return ""
-    stats["bytes_read"] += len(data)
-    return data.decode().strip()
-
-def perform_handshake(conn, role, stats, board_setup):
-    # Step 2: Send "Connected to the server!" and expect an "OK".
-    send_msg(conn, "Connected to the server!", stats)
-    print("Awaiting client response for initial handshake...")
-    resp = recv_msg(conn, stats)
-    print("Client response:", resp)
-    if resp != "OK":
-        print("Handshake failed at initial handshake.")
-        return False
-
-    # Step 4: Send board setup message (either default or custom).
-    send_msg(conn, board_setup, stats)
-    print("Awaiting client response for board setup...")
-    resp = recv_msg(conn, stats)
-    print("Client response:", resp)
-    if resp != "OK":
-        print("Handshake failed at board setup.")
-        return False
-
-    # Step 6: Send time message.
-    time_msg = "Time 30"  # e.g. 30 minutes for the match.
-    send_msg(conn, time_msg, stats)
-    print("Awaiting client response for time message...")
-    resp = recv_msg(conn, stats)
-    print("Client response:", resp)
-    if resp != "OK":
-        print("Handshake failed at time message.")
-        return False
-
-    # Step 9: Send 'Begin' message and the role assignment.
-    send_msg(conn, "Begin", stats)
-    send_msg(conn, f"Role {role}", stats)
-    return True
-
-def game_loop(conn_white, conn_black, stats, session_start):
-    sockets = [conn_white, conn_black]
-    while True:
-        readable, _, _ = select.select(sockets, [], [])
-        for s in readable:
-            msg = recv_msg(s, stats)
-            if msg == "":
-                print("A client disconnected unexpectedly.")
-                send_msg(conn_white, "exit", stats)
-                send_msg(conn_black, "exit", stats)
-                return
-            if msg.lower() == "exit":
-                print("A client requested exit.")
-                send_msg(conn_white, "exit", stats)
-                send_msg(conn_black, "exit", stats)
-                return
-            if msg.startswith("win:"):
-                print(f"Winning condition reached: {msg}")
-                send_msg(conn_white, msg, stats)
-                send_msg(conn_black, msg, stats)
-                return
-            # Relay normal moves:
-            if s == conn_white:
-                send_msg(conn_black, msg, stats)
-            else:
-                send_msg(conn_white, msg, stats)
 
 def start_server():
-    session_stats = {"bytes_read": 0, "bytes_written": 0}
+    host = '127.0.0.1'
+    game_port = 9999       # game (player) connections port
+    spectator_port = 10000 # spectator (GUI) connection port
+    stats = {"bytes_read": 0, "bytes_written": 0}
+    board_setup = "Setup Wa2 Wb2 Wc2 Wd2 We2 Wf2 Wg2 Wh2 Ba7 Bb7 Bc7 Bd7 Be7 Bf7 Bg7 Bh7"
+    starting_side = "White"  # default (not used actively here)
+    time_value = 30         # default time in minutes
+
+    # --- Game Server: Accept two player connections ---
+    game_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    game_sock.bind((host, game_port))
+    game_sock.listen(5)
+    print(f"Game server listening on {host}:{game_port}")
     
-    # --- Setup Creation Mode ---
-    choice = input("Use default setup? (Y/n): ").strip()
-    if choice.lower() in ["", "y", "yes"]:
-        board_setup = "Setup Wa2 Wb2 Wc2 Wd2 We2 Wf2 Wg2 Wh2 Ba7 Bb7 Bc7 Bd7 Be7 Bf7 Bg7 Bh7"
-        starting_side = "White"  # default starting side
-        print("Using default board setup. Starting side set to White.")
-    else:
-        board_setup = input("Enter custom board setup (format: Setup ...): ").strip()
-        ss = input("Enter starting side (Side White or Side Black): ").strip()
-        if ss.lower().startswith("side"):
-            starting_side = ss.split()[1].capitalize()
-            if starting_side not in ["White", "Black"]:
-                print("Invalid starting side. Defaulting to White.")
-                starting_side = "White"
-        else:
-            starting_side = "White"
-        print("Using custom board setup. Starting side:", starting_side)
+    print("Waiting for game connection 1...")
+    conn1, addr1 = game_sock.accept()
+    print("Game connection 1 from", addr1)
     
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        # Allow immediate reuse of the address.
-        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        s.bind((HOST, PORT))
-        s.listen(2)
-        print(f"Server listening on {HOST}:{PORT}")
-        print("Waiting for two clients to connect...")
+    print("Waiting for game connection 2...")
+    while True:
+        try:
+            conn2, addr2 = game_sock.accept()
+            print("Game connection 2 from", addr2)
+            break
+        except socket.timeout:
+            print("Still waiting for game connection 2...")
+    
+    # Set up file wrappers and local stats for each player.
+    s_file1 = conn1.makefile("r")
+    s_file2 = conn2.makefile("r")
+    stats1 = stats.copy()
+    stats2 = stats.copy()
+    
+    # --- Perform handshake with game players ---
+    send_msg(conn1, "Connected to the server!", stats1)
+    send_msg(conn2, "Connected to the server!", stats2)
+    recv_msg(s_file1, stats1)  # Expect an "OK"
+    recv_msg(s_file2, stats2)
+    
+    # Send board setup.
+    send_msg(conn1, board_setup, stats1)
+    send_msg(conn2, board_setup, stats2)
+    recv_msg(s_file1, stats1)
+    recv_msg(s_file2, stats2)
+    
+    # Send time message.
+    time_msg = f"Time {time_value}"
+    send_msg(conn1, time_msg, stats1)
+    send_msg(conn2, time_msg, stats2)
+    recv_msg(s_file1, stats1)
+    recv_msg(s_file2, stats2)
+    
+    # Send begin message (role assignments are not really used here)
+    send_msg(conn1, "BEGIN", stats1)
+    send_msg(conn2, "BEGIN", stats2)
+    send_msg(conn1, "Role White", stats1)
+    send_msg(conn2, "Role Black", stats2)
+    print("Game started with roles assigned.")
 
-        # Accept two connections.
-        conn1, addr1 = s.accept()
-        print(f"Accepted connection 1 from {addr1}")
-        conn2, addr2 = s.accept()
-        print(f"Accepted connection 2 from {addr2}")
+    # --- Spectator Listener ---
+    spec_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    spec_sock.bind((host, spectator_port))
+    spec_sock.listen(1)
+    spec_sock.settimeout(0.1)  # non-blocking accept
+    spectator_conn = None
+    print(f"Spectator server listening on {host}:{spectator_port} (for GUI connection)")
 
-        session_start = time.time()
-
-        # Determine roles based on chosen starting side.
-        if starting_side == "White":
-            role1, role2 = "White", "Black"
-        else:
-            role1, role2 = "Black", "White"
-
-        # Perform handshake with each client using the chosen board setup.
-        if not perform_handshake(conn1, role1, session_stats, board_setup):
-            conn1.close()
-            conn2.close()
-            return
-        if not perform_handshake(conn2, role2, session_stats, board_setup):
-            conn1.close()
-            conn2.close()
-            return
-
-        print("Both clients have completed handshake. Starting game loop.")
-        game_loop(conn1, conn2, session_stats, session_start)
-        conn1.close()
-        conn2.close()
+    # --- Game loop: forward moves from one player to the other and to spectator ---
+    while True:
+        # Check if a spectator is waiting and accept if needed.
+        if spectator_conn is None:
+            try:
+                sp_conn, sp_addr = spec_sock.accept()
+                spectator_conn = sp_conn
+                print("Spectator connected from", sp_addr)
+            except socket.timeout:
+                pass
+        
+        # Wait for a move from either game connection.
+        ready, _, _ = select.select([conn1, conn2], [], [], 0.1)
+        for r in ready:
+            if r == conn1:
+                msg = recv_msg(s_file1, stats1)
+                print("Received from conn1:", msg)
+                if msg.lower() == "exit" or msg.startswith("win:"):
+                    send_msg(conn2, msg, stats2)
+                    if spectator_conn:
+                        send_msg(spectator_conn, msg, stats)
+                        spectator_conn.close()
+                    conn1.close()
+                    conn2.close()
+                    print("Game over.")
+                    return
+                else:
+                    send_msg(conn2, msg, stats2)
+                    # Forward move to spectator, if connected.
+                    if spectator_conn:
+                        send_msg(spectator_conn, msg, stats)
+            elif r == conn2:
+                msg = recv_msg(s_file2, stats2)
+                print("Received from conn2:", msg)
+                if msg.lower() == "exit" or msg.startswith("win:"):
+                    send_msg(conn1, msg, stats1)
+                    if spectator_conn:
+                        send_msg(spectator_conn, msg, stats)
+                        spectator_conn.close()
+                    conn1.close()
+                    conn2.close()
+                    print("Game over.")
+                    return
+                else:
+                    send_msg(conn1, msg, stats1)
+                    if spectator_conn:
+                        send_msg(spectator_conn, msg, stats)
 
 if __name__ == "__main__":
     start_server() 
