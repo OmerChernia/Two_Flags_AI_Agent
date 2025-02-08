@@ -15,7 +15,8 @@ def send_message(sock, msg):
     try:
         sock.sendall(full_msg.encode())
     except BrokenPipeError:
-        log("Warning: Broken pipe encountered when sending message.")
+        log("Warning: Broken pipe encountered when sending message. "
+            "The server may have closed the connection. Consider reconnecting or cleaning up resources.")
 
 def receive_message(file_obj):
     """Reads one line (i.e. one message) from the file-like socket object."""
@@ -673,9 +674,9 @@ def main():
         if winner:
             log(f"Game over: {winner}")
             send_message(sock, f"win: {winner}")
-            # Instead of breaking immediately, wait for a REPLAY command.
-            replay_cmd = s_file.readline().strip()
-            if replay_cmd == "REPLAY":
+            # Instead of breaking immediately, wait for a NEW GAME command.
+            new_game_cmd = s_file.readline().strip()
+            if new_game_cmd == "NEW GAME":
                 setup_msg = s_file.readline().strip()  # New board setup
                 
                 # Reset the internal board state of the agent.
@@ -684,7 +685,7 @@ def main():
                 white_bitmap, black_bitmap = agent.white_bitmap, agent.black_bitmap
                 # Optionally, reset move counter (or any other per-game state).
                 move_count = 0
-                log("New game started (replay).")
+                log("New game started.")
                 continue
             else:
                 break

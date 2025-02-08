@@ -56,7 +56,6 @@ def start_server():
     spec_sock.listen(1)
     spec_sock.settimeout(0.1)
     spectator_conn = None
-    spectator_file = None
     print(f"Spectator server listening on {host}:{spectator_port} (for GUI connection)")
     
     # Optionally wait a few seconds for a spectator to connect.
@@ -65,9 +64,8 @@ def start_server():
         try:
             spectator_conn, sp_addr = spec_sock.accept()
             print("Spectator connected from", sp_addr)
-            spectator_conn.sendall((board_setup + "\n").encode())
-            # Wrap the spectator connection with a file-like object to read commands.
-            spectator_file = spectator_conn.makefile("r")
+            # Immediately send the initial board setup to the spectator.
+            send_msg(spectator_conn, board_setup, stats)
             break
         except socket.timeout:
             pass
@@ -132,41 +130,44 @@ def start_server():
 
     print("Game started with roles assigned.")
 
-    # --- Game Loop: forward messages and wait for replay requests ---
+    # --- Game Loop: forward moves between players and to spectator ---
     while True:
-        # Also check if a new spectator connects.
+        # Also check (again) if a spectator connection comes in (if not already connected).
         if spectator_conn is None:
             try:
-                spectator_conn, sp_addr = spec_sock.accept()
+                sp_conn, sp_addr = spec_sock.accept()
+                spectator_conn = sp_conn
                 print("Spectator connected from", sp_addr)
                 send_msg(spectator_conn, board_setup, stats)
-                spectator_file = spectator_conn.makefile("r")
             except socket.timeout:
                 pass
 
-        # Include game connections and spectator_file in the select list.
-        sources = [conn1, conn2]
-        if spectator_file is not None:
-            sources.append(spectator_file)
-        ready, _, _ = select.select(sources, [], [], 0.1)
-        game_over = False
-        win_msg = ""
+        ready, _, _ = select.select([conn1, conn2], [], [], 0.1)
         for r in ready:
             if r == conn1:
                 msg = recv_msg(s_file1, stats)
                 print("Received from conn1:", msg)
-                if msg.lower() == "exit":
-                    send_msg(conn2, msg, stats)
+                if msg.lower() == "exit" or msg.startswith("win:"):
+                    send_msg(conn1, msg, stats)
                     if spectator_conn:
                         send_msg(spectator_conn, msg, stats)
-                    conn1.close()
-                    conn2.close()
-                    print("Game over due to exit.")
-                    return
-                if msg.startswith("win:"):
-                    win_msg = msg
-                    game_over = True
-                    break
+                        spectator_conn.close()
+                    # Wait for a new game command rather than closing immediately.
+                    new_game_cmd = s_file1.readline().strip()
+                    if new_game_cmd == "NEW GAME":
+                        new_setup = "Setup Wa2 Wb2 Wc2 Wd2 We2 Wf2 Wg2 Wh2 Ba7 Bb7 Bc7 Bd7 Be7 Bf7 Bg7 Bh7"
+                        send_msg(conn1, "NEW GAME", stats)
+                        send_msg(conn1, new_setup, stats)
+                        if spectator_conn:
+                            send_msg(spectator_conn, "NEW GAME", stats)
+                            send_msg(spectator_conn, new_setup, stats)
+                        # (Optionally reinitialize game state here.)
+                        continue
+                    else:
+                        conn1.close()
+                        conn2.close()
+                        print("Game over.")
+                        return
                 else:
                     send_msg(conn2, msg, stats)
                     if spectator_conn:
@@ -174,82 +175,19 @@ def start_server():
             elif r == conn2:
                 msg = recv_msg(s_file2, stats)
                 print("Received from conn2:", msg)
-                if msg.lower() == "exit":
-                    send_msg(conn1, msg, stats)
+                if msg.lower() == "exit" or msg.startswith("win:"):
+                    send_msg(conn2, msg, stats)
                     if spectator_conn:
                         send_msg(spectator_conn, msg, stats)
+                        spectator_conn.close()
                     conn1.close()
                     conn2.close()
-                    print("Game over due to exit.")
+                    print("Game over.")
                     return
-                if msg.startswith("win:"):
-                    win_msg = msg
-                    game_over = True
-                    break
                 else:
                     send_msg(conn1, msg, stats)
                     if spectator_conn:
                         send_msg(spectator_conn, msg, stats)
-            elif r == spectator_file:
-                # Read any commands from the spectator.
-                spec_msg = recv_msg(spectator_file, stats)
-                if spec_msg == "REPLAY":
-                    print("Spectator requested replay.")
-                    # If the game is not yet over, trigger game over.
-                    if not game_over:
-                        win_msg = "win: Replay requested"
-                        game_over = True
-                    break
-        if game_over:
-            # Broadcast the win/replay message to both game players.
-            send_msg(conn1, win_msg, stats)
-            send_msg(conn2, win_msg, stats)
-            if spectator_conn:
-                send_msg(spectator_conn, win_msg, stats)
-            print("Game over:", win_msg)
-            # Wait for a replay command (if not already received via the spectator file).
-            if win_msg.startswith("win: Replay"):
-                replay_received = True
-            else:
-                print("Waiting for replay request from spectator...")
-                replay_received = False
-                start_wait = time.time()
-                while time.time() - start_wait < 30:
-                    if spectator_file:
-                        ready_spec, _, _ = select.select([spectator_file], [], [], 0.1)
-                        if ready_spec:
-                            replay_cmd = recv_msg(spectator_file, stats)
-                            if replay_cmd == "REPLAY":
-                                replay_received = True
-                                break
-                    time.sleep(0.1)
-            if replay_received:
-                print("Replay request received. Resetting game...")
-                send_msg(conn1, board_setup, stats)
-                send_msg(conn2, board_setup, stats)
-                recv_msg(s_file1, stats)
-                recv_msg(s_file2, stats)
-                send_msg(conn1, str(time_value), stats)
-                send_msg(conn2, str(time_value), stats)
-                recv_msg(s_file1, stats)
-                recv_msg(s_file2, stats)
-                send_msg(conn1, "BEGIN", stats)
-                send_msg(conn2, "BEGIN", stats)
-                if starting_side == "White":
-                    role1, role2 = "White", "Black"
-                else:
-                    role1, role2 = "Black", "White"
-                send_msg(conn1, f"Role {role1}", stats)
-                send_msg(conn2, f"Role {role2}", stats)
-                print("New game started.")
-                continue
-            else:
-                if spectator_conn:
-                    spectator_conn.close()
-                conn1.close()
-                conn2.close()
-                print("No replay request received. Game session ended.")
-                return
 
 if __name__ == "__main__":
     # Start the server (game and spectator handling) in a separate daemon thread.

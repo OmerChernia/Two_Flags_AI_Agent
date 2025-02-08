@@ -663,12 +663,12 @@ class PawnChessGUI:
 
     def request_replay(self):
         """
-        Called when the Replay button is clicked.
-        Sends a replay command to the server via the spectator connection.
+        Called when the New Game button is clicked.
+        Sends a new game command to the server via the spectator connection.
         """
         if hasattr(self, 'spectator_client') and self.spectator_client is not None:
-            self.spectator_client.send_message("REPLAY")
-            self.status_label.config(text="Replay requested. Waiting for new game setup...")
+            self.spectator_client.send_message("NEW GAME")
+            self.status_label.config(text="New game requested. Waiting for new game setup...")
         else:
             print("No spectator connection available.")
 

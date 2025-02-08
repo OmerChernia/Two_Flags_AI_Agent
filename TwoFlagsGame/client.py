@@ -6,8 +6,12 @@ def send_msg(conn, msg, stats):
     # Append a newline so that the receiver can determine the end of the message.
     full_msg = msg + "\n"
     data = full_msg.encode()
-    conn.sendall(data)
-    stats["bytes_written"] += len(data)
+    try:
+        conn.sendall(data)
+        stats["bytes_written"] += len(data)
+    except BrokenPipeError:
+        print("Send error: [Errno 32] Broken pipe. The connection has been closed by the server. "
+              "Please reconnect or restart the client.")
 
 def recv_msg(conn_file, stats):
     # Read a full line (i.e. one message ending with '\n')
@@ -425,11 +429,11 @@ def start_client():
                 if opp_move.lower() == "exit":
                     print("Server has quit the session.")
                     break
-                if opp_move == "REPLAY":
+                if opp_move == "NEW GAME":
                     # New game requested: read the new board setup and reinitialize.
                     setup_msg = recv_msg(s_file, session_stats)
                     white_bitmap, black_bitmap = initialize_boards(setup_msg)
-                    print("New game started (replay).")
+                    print("New game started.")
                     display_boards(white_bitmap, black_bitmap)
                     continue
                 if opp_move.startswith("win:"):
@@ -453,10 +457,10 @@ def start_client():
                 if opp_move.lower() == "exit":
                     print("Server has quit the session.")
                     break
-                if opp_move == "REPLAY":
+                if opp_move == "NEW GAME":
                     setup_msg = recv_msg(s_file, session_stats)
                     white_bitmap, black_bitmap = initialize_boards(setup_msg)
-                    print("New game started (replay).")
+                    print("New game started.")
                     display_boards(white_bitmap, black_bitmap)
                     continue
                 print("Opponent move received:", opp_move)
