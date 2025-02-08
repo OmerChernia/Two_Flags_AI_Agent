@@ -427,18 +427,18 @@ class PawnChessGUI:
             y = margin_top + row * square_size + square_size/2
             self.canvas.create_text(x, y, text=label, font=("Helvetica", 12))
             
-    def update_board_state(self, move_str):
-        """
-        Update the board state based on a move string (e.g. "a2a4").
-        It moves the pawn from the source to the destination square,
-        and if there is an opponent piece on the destination, it is removed.
-        """
-        if len(move_str) < 4:
+    def update_board_state(self, msg):
+        # Only process msg if it is a valid move (length 4 with proper coordinate formatting).
+        if not (len(msg) == 4 and msg[0].isalpha() and msg[1].isdigit() 
+                and msg[2].isalpha() and msg[3].isdigit()):
+            print("Ignoring non-move message:", msg)
             return
-        source = move_str[0:2]
-        dest = move_str[2:4]
+
+        source = msg[:2]
+        dest = msg[2:4]
         s_row, s_col = convert_coord(source)
         d_row, d_col = convert_coord(dest)
+        # Proceed to update the internal board state with the computed indices.
         # Determine which side's pawn is being moved.
         if self.white_bitmap[s_row][s_col]:
             self.white_bitmap[s_row][s_col] = False

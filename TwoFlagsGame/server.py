@@ -48,9 +48,32 @@ def start_server():
     stats = {"bytes_read": 0, "bytes_written": 0}
     time_value = 30         # default time in minutes
 
-    # Create game server socket and enable address reuse.
+    # --- Spectator Listener Setup (bind first so spectator can connect early) ---
+    spec_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    spec_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    spec_sock.bind((host, spectator_port))
+    spec_sock.listen(1)
+    spec_sock.settimeout(0.1)
+    spectator_conn = None
+    print(f"Spectator server listening on {host}:{spectator_port} (for GUI connection)")
+    
+    # Optionally wait a few seconds for a spectator to connect.
+    start_wait = time.time()
+    while time.time() - start_wait < 5:
+        try:
+            spectator_conn, sp_addr = spec_sock.accept()
+            print("Spectator connected from", sp_addr)
+            # Immediately send the initial board setup to the spectator.
+            send_msg(spectator_conn, board_setup, stats)
+            break
+        except socket.timeout:
+            pass
+    if spectator_conn is None:
+        print("No spectator connected before game start.")
+
+    # --- Game Server Setup ---
     game_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    game_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)  # Allow address reuse.
+    game_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     game_sock.bind((host, game_port))
     game_sock.listen(5)
     print(f"Game server listening on {host}:{game_port}")
@@ -59,46 +82,42 @@ def start_server():
     conn1, addr1 = game_sock.accept()
     print("Game connection 1 from", addr1)
     s_file1 = conn1.makefile("r")
-
-    # Check if a custom board setup is being sent.
+    
+    # Check if a custom board setup is being sent from connection 1.
+    import select
     ready, _, _ = select.select([conn1], [], [], 0.5)
     if ready:
         first_msg = recv_msg(s_file1, stats)
     else:
         first_msg = ""
-    if first_msg.startswith("Setup "):  # Custom board message detected.
-        update_setup(first_msg, "White")  # Update the global board_setup.
+    if first_msg.startswith("Setup "):
+        update_setup(first_msg, "White")
         send_msg(conn1, "SETUP-ACK", stats)
         print("Custom board setup received from connection 1.")
     # If no custom setup is provided, do nothing.
-    # (Do NOT send an "OK" here)
 
-    # --- Accept second player connection ---
     print("Waiting for game connection 2...")
     conn2, addr2 = game_sock.accept()
     print("Game connection 2 from", addr2)
     s_file2 = conn2.makefile("r")
 
     # --- Common Handshake for Both Players ---
-    # Step A: Announce connection.
     send_msg(conn1, "Connected to the server!", stats)
     send_msg(conn2, "Connected to the server!", stats)
     recv_msg(s_file1, stats)  # Expecting "OK" from conn1.
     recv_msg(s_file2, stats)  # Expecting "OK" from conn2.
 
-    # Step B: Send board setup (using the (possibly updated) global board_setup).
     send_msg(conn1, board_setup, stats)
     send_msg(conn2, board_setup, stats)
+    # (Spectator already received board_setup upon connection.)
     recv_msg(s_file1, stats)  # Expecting "OK" after board setup.
     recv_msg(s_file2, stats)
 
-    # Step C: Send time message.
     send_msg(conn1, str(time_value), stats)
     send_msg(conn2, str(time_value), stats)
     recv_msg(s_file1, stats)  # Expecting "OK" after time message.
     recv_msg(s_file2, stats)
 
-    # Step D: Send BEGIN and role assignments.
     send_msg(conn1, "BEGIN", stats)
     send_msg(conn2, "BEGIN", stats)
     if starting_side == "White":
@@ -110,26 +129,18 @@ def start_server():
 
     print("Game started with roles assigned.")
 
-    # --- Spectator Listener ---
-    spec_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    spec_sock.bind((host, spectator_port))
-    spec_sock.listen(1)
-    spec_sock.settimeout(0.1)  # non-blocking accept
-    spectator_conn = None
-    print(f"Spectator server listening on {host}:{spectator_port} (for GUI connection)")
-
-    # --- Game loop: forward moves from one player to the other and to spectator ---
+    # --- Game Loop: forward moves between players and to spectator ---
     while True:
-        # Check if a spectator is waiting and accept if needed.
+        # Also check (again) if a spectator connection comes in (if not already connected).
         if spectator_conn is None:
             try:
                 sp_conn, sp_addr = spec_sock.accept()
                 spectator_conn = sp_conn
                 print("Spectator connected from", sp_addr)
+                send_msg(spectator_conn, board_setup, stats)
             except socket.timeout:
                 pass
-        
-        # Wait for a move from either game connection.
+
         ready, _, _ = select.select([conn1, conn2], [], [], 0.1)
         for r in ready:
             if r == conn1:
@@ -146,7 +157,6 @@ def start_server():
                     return
                 else:
                     send_msg(conn2, msg, stats)
-                    # Forward move to spectator, if connected.
                     if spectator_conn:
                         send_msg(spectator_conn, msg, stats)
             elif r == conn2:
