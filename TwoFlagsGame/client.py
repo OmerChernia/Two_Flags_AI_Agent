@@ -3,22 +3,25 @@ import sys
 import time
 
 def send_msg(conn, msg, stats):
-    data = msg.encode()
+    # Append a newline so that the receiver can determine the end of the message.
+    full_msg = msg + "\n"
+    data = full_msg.encode()
     conn.sendall(data)
     stats["bytes_written"] += len(data)
 
-def recv_msg(conn, stats):
-    data = conn.recv(1024)
-    if not data:
+def recv_msg(conn_file, stats):
+    # Read a full line (i.e. one message ending with '\n')
+    line = conn_file.readline()
+    if not line:
         return ""
-    stats["bytes_read"] += len(data)
-    return data.decode().strip()
+    stats["bytes_read"] += len(line)
+    return line.strip()
 
 def convert_coord(coord):
     """
     Convert an algebraic coordinate (e.g. 'a2') to matrix indices.
-    The board is stored as an 8x8 list of lists where row 0
-    corresponds to the top of the board (rank 8) and row 7 to rank 1.
+    The board is stored as an 8x8 list of lists where row 0 corresponds to the top (rank 8)
+    and row 7 corresponds to rank 1.
     """
     col = ord(coord[0].lower()) - ord('a')
     row = 8 - int(coord[1])
@@ -51,7 +54,7 @@ def display_board(bitmap, label):
     """
     Display a single bitmap with a header.
     Rows are labeled 8 (top) to 1 (bottom) and columns a to h.
-    A pawn is shown as a "P" while an empty square is a dot.
+    A pawn is shown as a "1" while an empty square is a dot.
     """
     print(f"--- {label} Pawn Board ---")
     print("  a b c d e f g h")
@@ -65,7 +68,7 @@ def display_board(bitmap, label):
 
 def display_boards(white_bitmap, black_bitmap):
     """
-    Display both white and black bitmaps.
+    Display both the white and black pawn boards.
     """
     display_board(white_bitmap, "White")
     display_board(black_bitmap, "Black")
@@ -73,32 +76,139 @@ def display_boards(white_bitmap, black_bitmap):
 def execute_move(move, own_bitmap, opp_bitmap):
     """
     Update the appropriate bitmap given a move in the format "e2e4".
-    - Removes the pawn from the source cell of the given board.
-    - If the destination cell on the opponent's board is occupied, it removes that pawn (capture).
-    - Places the pawn in the destination cell of the given board.
+    - Removes the pawn from the source cell of own_bitmap.
+    - If the destination cell on the opponent's board is occupied, it removes that pawn.
+    - Places the pawn in the destination cell of own_bitmap.
+    Assumes that the move has already been checked to be legal.
     """
-    if len(move) != 4:
-        print("Invalid move format! Move must be 4 characters (e.g., e2e4).")
-        return
     from_coord = move[:2]
     to_coord = move[2:]
     r_from, c_from = convert_coord(from_coord)
     r_to, c_to = convert_coord(to_coord)
     
-    if not own_bitmap[r_from][c_from]:
-        print(f"Warning: No pawn found at {from_coord} on your board.")
-    else:
-        # Remove pawn from its current position.
-        own_bitmap[r_from][c_from] = False
-        # Check for capturing an opponent's pawn.
-        if opp_bitmap[r_to][c_to]:
-            print("Capture: Opponent's pawn removed!")
-            opp_bitmap[r_to][c_to] = False
-        # Place the pawn in the destination.
-        own_bitmap[r_to][c_to] = True
+    # Remove pawn from its current position.
+    own_bitmap[r_from][c_from] = False
+    # Capture opponent pawn if present.
+    if opp_bitmap[r_to][c_to]:
+        print("Capture: Opponent's pawn removed!")
+        opp_bitmap[r_to][c_to] = False
+    # Place pawn at destination.
+    own_bitmap[r_to][c_to] = True
+
+def is_move_legal(move, role, own_bitmap, opp_bitmap):
+    """
+    Returns True if the move is legal; otherwise prints an error and returns False.
+
+    Legal move constraints checked:
+      1. Format: exactly 4 characters.
+      2. Source/destination coordinates must be on board.
+      3. A pawn must be at the source position.
+      4. Pawns must move in the forward direction (White upward, Black downward).
+      5. A straight move must target an empty square.
+      6. Two‑square forward moves are allowed only from the initial row
+         (row 6 for White, row 1 for Black) and only if the path is clear.
+      7. Diagonal moves are allowed only for capturing an opponent pawn.
+      8. Any other displacement is illegal.
+    """
+    if len(move) != 4:
+        print("Invalid move format. Use exactly 4 characters (e.g. e2e3).")
+        return False
+    try:
+        fr, fc = convert_coord(move[0:2])
+        tr, tc = convert_coord(move[2:4])
+    except Exception as e:
+        print("Error: Invalid coordinates.")
+        return False
+
+    row_diff = tr - fr
+    col_diff = tc - fc
+
+    # Check that the source cell actually has a pawn.
+    if not own_bitmap[fr][fc]:
+        print("Illegal move: no pawn at the source position.")
+        return False
+
+    if role == "White":
+        # For White, moving forward means decreasing row number.
+        if row_diff >= 0:
+            print("Illegal move: white pawns must move upward.")
+            return False
+
+        # Straight move
+        if col_diff == 0:
+            # One-square move.
+            if row_diff == -1:
+                if own_bitmap[tr][tc] or opp_bitmap[tr][tc]:
+                    print("Illegal move: destination is occupied.")
+                    return False
+                return True
+            # Two-square move from initial row (row 6).
+            elif row_diff == -2:
+                if fr != 6:
+                    print("Illegal move: two-square move allowed only from initial row.")
+                    return False
+                if own_bitmap[fr - 1][fc] or opp_bitmap[fr - 1][fc]:
+                    print("Illegal move: cannot jump over a pawn.")
+                    return False
+                if own_bitmap[tr][tc] or opp_bitmap[tr][tc]:
+                    print("Illegal move: destination is occupied.")
+                    return False
+                return True
+            else:
+                print("Illegal move: can only move one square (or two from initial row).")
+                return False
+        # Diagonal move (capture)
+        elif abs(col_diff) == 1 and row_diff == -1:
+            if opp_bitmap[tr][tc]:
+                return True
+            else:
+                print("Illegal move: diagonal move allowed only when capturing an opponent's pawn.")
+                return False
+        else:
+            print("Illegal move: unsupported movement pattern for white pawn.")
+            return False
+
+    elif role == "Black":
+        # For Black, moving forward means increasing row number.
+        if row_diff <= 0:
+            print("Illegal move: black pawns must move downward.")
+            return False
+
+        if col_diff == 0:
+            if row_diff == 1:
+                if own_bitmap[tr][tc] or opp_bitmap[tr][tc]:
+                    print("Illegal move: destination is occupied.")
+                    return False
+                return True
+            elif row_diff == 2:
+                if fr != 1:
+                    print("Illegal move: two-square move allowed only from initial row.")
+                    return False
+                if own_bitmap[fr + 1][fc] or opp_bitmap[fr + 1][fc]:
+                    print("Illegal move: cannot jump over a pawn.")
+                    return False
+                if own_bitmap[tr][tc] or opp_bitmap[tr][tc]:
+                    print("Illegal move: destination is occupied.")
+                    return False
+                return True
+            else:
+                print("Illegal move: can only move one square (or two from initial row).")
+                return False
+        elif abs(col_diff) == 1 and row_diff == 1:
+            if opp_bitmap[tr][tc]:
+                return True
+            else:
+                print("Illegal move: diagonal move allowed only when capturing an opponent's pawn.")
+                return False
+        else:
+            print("Illegal move: unsupported movement pattern for black pawn.")
+            return False
+
+    print("Illegal move: does not match any legal movement patterns.")
+    return False
 
 def start_client():
-    # Use command-line args for host and port if provided.
+    # Use command-line arguments for host and port if provided.
     if len(sys.argv) >= 3:
         host = sys.argv[1]
         port = int(sys.argv[2])
@@ -111,19 +221,20 @@ def start_client():
 
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.connect((host, port))
+        # Wrap the socket with a file-like object to enable readline().
+        s_file = s.makefile('r')
         print("Connected to the server!")
 
         # -- Handshake sequence --
         # Step 2: Receive "Connected to the server!" message.
-        msg = recv_msg(s, session_stats)
+        msg = recv_msg(s_file, session_stats)
         print(f"Server says: {msg}")
         # Step 3: Send "OK".
         send_msg(s, "OK", session_stats)
 
         # Step 4: Receive board setup message.
-        msg = recv_msg(s, session_stats)
+        msg = recv_msg(s_file, session_stats)
         print(f"Server says: {msg}")
-        # Initialize board bitmaps from the setup message.
         if msg.startswith("Setup"):
             white_bitmap, black_bitmap = initialize_boards(msg)
             print("Initial board setup (parsed from server):")
@@ -135,17 +246,17 @@ def start_client():
         send_msg(s, "OK", session_stats)
 
         # Step 6: Receive time message.
-        msg = recv_msg(s, session_stats)
+        msg = recv_msg(s_file, session_stats)
         print(f"Server says: {msg}")
         # Step 7: Send "OK".
         send_msg(s, "OK", session_stats)
 
         # Step 9: Receive "Begin" message.
-        msg = recv_msg(s, session_stats)
+        msg = recv_msg(s_file, session_stats)
         print(f"Server says: {msg}")
 
-        # Receive role assignment (e.g. "Role White" or "Role Black").
-        role_msg = recv_msg(s, session_stats)
+        # Receive role assignment (e.g., "Role White" or "Role Black").
+        role_msg = recv_msg(s_file, session_stats)
         print(f"Server says: {role_msg}")
         role = ""
         if role_msg.startswith("Role"):
@@ -155,10 +266,9 @@ def start_client():
             print("Did not receive role assignment. Exiting.")
             return
 
-        # Set up pointers for updating. If you're White then:
-        #   - your own moves update the white bitmap;
-        #   - opponent moves update the black bitmap.
-        # And vice versa for Black.
+        # Set pointers for updating:
+        # For White: own_bitmap = white_bitmap, opp_bitmap = black_bitmap.
+        # For Black: own_bitmap = black_bitmap, opp_bitmap = white_bitmap.
         if role == "White":
             own_bitmap, opp_bitmap = white_bitmap, black_bitmap
         elif role == "Black":
@@ -171,30 +281,39 @@ def start_client():
         if role == "White":
             print("You are White. You make the first move.")
             while True:
-                my_move = input("Enter your move (or 'exit' to quit): ").strip()
-                send_msg(s, my_move, session_stats)
+                # Input local move and check legality before sending.
+                while True:
+                    my_move = input("Enter your move (or 'exit' to quit): ").strip()
+                    if my_move.lower() == "exit":
+                        break
+                    if is_move_legal(my_move, role, own_bitmap, opp_bitmap):
+                        break
+                    else:
+                        print("Illegal move. Please try again.")
                 if my_move.lower() == "exit":
+                    send_msg(s, my_move, session_stats)
                     break
-                # Update your board for your move.
+
+                send_msg(s, my_move, session_stats)
+                # Update own board.
                 execute_move(my_move, own_bitmap, opp_bitmap)
                 print("Updated board after your move:")
                 display_boards(white_bitmap, black_bitmap)
 
                 # Wait for Black's move.
-                opp_move = recv_msg(s, session_stats)
+                opp_move = recv_msg(s_file, session_stats)
                 if opp_move.lower() == "exit":
                     print("Server has quit the session.")
                     break
                 print("Opponent move received:", opp_move)
-                # Update the opponent's board for their move.
                 execute_move(opp_move, opp_bitmap, own_bitmap)
                 print("Updated board after opponent's move:")
                 display_boards(white_bitmap, black_bitmap)
         elif role == "Black":
             print("You are Black. Waiting for White's move.")
             while True:
-                # Wait for White's move first.
-                opp_move = recv_msg(s, session_stats)
+                # Wait for White's move.
+                opp_move = recv_msg(s_file, session_stats)
                 if opp_move.lower() == "exit":
                     print("Server has quit the session.")
                     break
@@ -203,10 +322,20 @@ def start_client():
                 print("Updated board after opponent's move:")
                 display_boards(white_bitmap, black_bitmap)
 
-                my_move = input("Enter your move (or 'exit' to quit): ").strip()
-                send_msg(s, my_move, session_stats)
+                # Input local move and check legality.
+                while True:
+                    my_move = input("Enter your move (or 'exit' to quit): ").strip()
+                    if my_move.lower() == "exit":
+                        break
+                    if is_move_legal(my_move, role, own_bitmap, opp_bitmap):
+                        break
+                    else:
+                        print("Illegal move. Please try again.")
                 if my_move.lower() == "exit":
+                    send_msg(s, my_move, session_stats)
                     break
+
+                send_msg(s, my_move, session_stats)
                 execute_move(my_move, own_bitmap, opp_bitmap)
                 print("Updated board after your move:")
                 display_boards(white_bitmap, black_bitmap)

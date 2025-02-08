@@ -6,7 +6,8 @@ HOST = '127.0.0.1'
 PORT = 9999
 
 def send_msg(conn, msg, stats):
-    data = msg.encode()
+    full_msg = msg + "\n"
+    data = full_msg.encode()
     conn.sendall(data)
     stats["bytes_written"] += len(data)
 
