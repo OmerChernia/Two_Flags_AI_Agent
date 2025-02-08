@@ -86,6 +86,8 @@ def game_loop(conn_white, conn_black, stats, session_start):
 def start_server():
     session_stats = {"bytes_read": 0, "bytes_written": 0}
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        # Enable reuse of the address to avoid the "Address already in use" error.
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         s.bind((HOST, PORT))
         s.listen(2)
         print(f"Server listening on {HOST}:{PORT}")
