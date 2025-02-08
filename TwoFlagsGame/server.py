@@ -1,6 +1,9 @@
 import socket
 import select
 import time
+import threading
+import tkinter as tk
+from gui import PawnChessGUI
 
 def send_msg(conn, msg, stats):
     full_msg = msg + "\n"
@@ -139,4 +142,11 @@ def start_server():
                         send_msg(spectator_conn, msg, stats)
 
 if __name__ == "__main__":
-    start_server() 
+    # Start the server (game and spectator handling) in a separate daemon thread.
+    server_thread = threading.Thread(target=start_server, daemon=True)
+    server_thread.start()
+
+    # Now start the GUI automatically. This GUI can be used as your spectator/human client.
+    root = tk.Tk()
+    gui = PawnChessGUI(root)
+    root.mainloop() 
