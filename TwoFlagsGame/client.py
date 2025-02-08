@@ -95,7 +95,7 @@ def execute_move(move, own_bitmap, opp_bitmap):
     # Place pawn at destination.
     own_bitmap[r_to][c_to] = True
 
-def is_move_legal(move, role, own_bitmap, opp_bitmap):
+def is_move_legal(move, role, own_bitmap, opp_bitmap, debug=True):
     """
     Returns True if the move is legal; otherwise prints an error and returns False.
 
@@ -111,101 +111,215 @@ def is_move_legal(move, role, own_bitmap, opp_bitmap):
       8. Any other displacement is illegal.
     """
     if len(move) != 4:
-        print("Invalid move format. Use exactly 4 characters (e.g. e2e3).")
+        if debug:
+            print("Invalid move format. Use exactly 4 characters (e.g. e2e3).")
         return False
     try:
         fr, fc = convert_coord(move[0:2])
         tr, tc = convert_coord(move[2:4])
     except Exception as e:
-        print("Error: Invalid coordinates.")
+        if debug:
+            print("Error: Invalid coordinates.")
         return False
 
     row_diff = tr - fr
     col_diff = tc - fc
 
-    # Check that the source cell actually has a pawn.
     if not own_bitmap[fr][fc]:
-        print("Illegal move: no pawn at the source position.")
+        if debug:
+            print("Illegal move: no pawn at the source position.")
         return False
 
     if role == "White":
-        # For White, moving forward means decreasing row number.
         if row_diff >= 0:
-            print("Illegal move: white pawns must move upward.")
+            if debug:
+                print("Illegal move: white pawns must move upward.")
             return False
-
-        # Straight move
         if col_diff == 0:
-            # One-square move.
             if row_diff == -1:
                 if own_bitmap[tr][tc] or opp_bitmap[tr][tc]:
-                    print("Illegal move: destination is occupied.")
+                    if debug:
+                        print("Illegal move: destination is occupied.")
                     return False
                 return True
-            # Two-square move from initial row (row 6).
             elif row_diff == -2:
                 if fr != 6:
-                    print("Illegal move: two-square move allowed only from initial row.")
+                    if debug:
+                        print("Illegal move: two-square move allowed only from initial row.")
                     return False
                 if own_bitmap[fr - 1][fc] or opp_bitmap[fr - 1][fc]:
-                    print("Illegal move: cannot jump over a pawn.")
+                    if debug:
+                        print("Illegal move: cannot jump over a pawn.")
                     return False
                 if own_bitmap[tr][tc] or opp_bitmap[tr][tc]:
-                    print("Illegal move: destination is occupied.")
+                    if debug:
+                        print("Illegal move: destination is occupied.")
                     return False
                 return True
             else:
-                print("Illegal move: can only move one square (or two from initial row).")
+                if debug:
+                    print("Illegal move: can only move one square (or two from initial row).")
                 return False
-        # Diagonal move (capture)
         elif abs(col_diff) == 1 and row_diff == -1:
             if opp_bitmap[tr][tc]:
                 return True
             else:
-                print("Illegal move: diagonal move allowed only when capturing an opponent's pawn.")
+                if debug:
+                    print("Illegal move: diagonal move allowed only when capturing an opponent's pawn.")
                 return False
         else:
-            print("Illegal move: unsupported movement pattern for white pawn.")
+            if debug:
+                print("Illegal move: unsupported movement pattern for white pawn.")
             return False
-
     elif role == "Black":
-        # For Black, moving forward means increasing row number.
         if row_diff <= 0:
-            print("Illegal move: black pawns must move downward.")
+            if debug:
+                print("Illegal move: black pawns must move downward.")
             return False
-
         if col_diff == 0:
             if row_diff == 1:
                 if own_bitmap[tr][tc] or opp_bitmap[tr][tc]:
-                    print("Illegal move: destination is occupied.")
+                    if debug:
+                        print("Illegal move: destination is occupied.")
                     return False
                 return True
             elif row_diff == 2:
                 if fr != 1:
-                    print("Illegal move: two-square move allowed only from initial row.")
+                    if debug:
+                        print("Illegal move: two-square move allowed only from initial row.")
                     return False
                 if own_bitmap[fr + 1][fc] or opp_bitmap[fr + 1][fc]:
-                    print("Illegal move: cannot jump over a pawn.")
+                    if debug:
+                        print("Illegal move: cannot jump over a pawn.")
                     return False
                 if own_bitmap[tr][tc] or opp_bitmap[tr][tc]:
-                    print("Illegal move: destination is occupied.")
+                    if debug:
+                        print("Illegal move: destination is occupied.")
                     return False
                 return True
             else:
-                print("Illegal move: can only move one square (or two from initial row).")
+                if debug:
+                    print("Illegal move: can only move one square (or two from initial row).")
                 return False
         elif abs(col_diff) == 1 and row_diff == 1:
             if opp_bitmap[tr][tc]:
                 return True
             else:
-                print("Illegal move: diagonal move allowed only when capturing an opponent's pawn.")
+                if debug:
+                    print("Illegal move: diagonal move allowed only when capturing an opponent's pawn.")
                 return False
         else:
-            print("Illegal move: unsupported movement pattern for black pawn.")
+            if debug:
+                print("Illegal move: unsupported movement pattern for black pawn.")
             return False
-
-    print("Illegal move: does not match any legal movement patterns.")
+    if debug:
+        print("Illegal move: does not match any legal movement patterns.")
     return False
+
+def coord_to_algebraic(row, col):
+    """
+    Convert board indices to algebraic coordinate (e.g. 'a2').
+    Row 0 corresponds to rank 8; row 7 corresponds to rank 1.
+    """
+    letter = chr(ord('a') + col)
+    number = str(8 - row)
+    return letter + number
+
+def generate_all_legal_moves(role, own_bitmap, opp_bitmap):
+    """
+    Scan the board for all pawns of the given role and generate candidate moves.
+    Only moves that pass is_move_legal() are included.
+    """
+    moves = []
+    for r in range(8):
+        for c in range(8):
+            if not own_bitmap[r][c]:
+                continue
+            src = coord_to_algebraic(r, c)
+            if role == "White":
+                # One-square forward.
+                nr = r - 1
+                if nr >= 0:
+                    dest = coord_to_algebraic(nr, c)
+                    candidate = src + dest
+                    if is_move_legal(candidate, role, own_bitmap, opp_bitmap, debug=False):
+                        moves.append(candidate)
+                # Two-square move (only from initial row 6).
+                if r == 6:
+                    nr = r - 2
+                    if nr >= 0:
+                        dest = coord_to_algebraic(nr, c)
+                        candidate = src + dest
+                        if is_move_legal(candidate, role, own_bitmap, opp_bitmap, debug=False):
+                            moves.append(candidate)
+                # Diagonal captures.
+                nr = r - 1
+                for dc in [-1, 1]:
+                    nc = c + dc
+                    if 0 <= nc < 8 and nr >= 0:
+                        dest = coord_to_algebraic(nr, nc)
+                        candidate = src + dest
+                        if is_move_legal(candidate, role, own_bitmap, opp_bitmap, debug=False):
+                            moves.append(candidate)
+            elif role == "Black":
+                # One-square forward.
+                nr = r + 1
+                if nr < 8:
+                    dest = coord_to_algebraic(nr, c)
+                    candidate = src + dest
+                    if is_move_legal(candidate, role, own_bitmap, opp_bitmap, debug=False):
+                        moves.append(candidate)
+                # Two-square move (only from initial row 1).
+                if r == 1:
+                    nr = r + 2
+                    if nr < 8:
+                        dest = coord_to_algebraic(nr, c)
+                        candidate = src + dest
+                        if is_move_legal(candidate, role, own_bitmap, opp_bitmap, debug=False):
+                            moves.append(candidate)
+                # Diagonal captures.
+                nr = r + 1
+                for dc in [-1, 1]:
+                    nc = c + dc
+                    if 0 <= nc < 8 and nr < 8:
+                        dest = coord_to_algebraic(nr, nc)
+                        candidate = src + dest
+                        if is_move_legal(candidate, role, own_bitmap, opp_bitmap, debug=False):
+                            moves.append(candidate)
+    return moves
+
+def check_win_conditions(white_bitmap, black_bitmap):
+    """
+    Examine the two board bitmaps and determine if a win condition has been met.
+    Returns a win message string (e.g. "White wins") or None otherwise.
+    
+    Conditions:
+      1. A pawn has reached the opponent's first row.
+         - White wins if any white pawn is on row 0.
+         - Black wins if any black pawn is on row 7.
+      2. One player has no pawns left.
+      3. One player cannot make any legal move.
+    """
+    # Condition 1.
+    for c in range(8):
+        if white_bitmap[0][c]:
+            return "White wins"
+    for c in range(8):
+        if black_bitmap[7][c]:
+            return "Black wins"
+    # Condition 2.
+    white_count = sum(cell for row in white_bitmap for cell in row)
+    black_count = sum(cell for row in black_bitmap for cell in row)
+    if black_count == 0:
+        return "White wins"
+    if white_count == 0:
+        return "Black wins"
+    # Condition 3.
+    if not generate_all_legal_moves("White", white_bitmap, black_bitmap):
+        return "Black wins"
+    if not generate_all_legal_moves("Black", black_bitmap, white_bitmap):
+        return "White wins"
+    return None
 
 def start_client():
     # Use command-line arguments for host and port if provided.
@@ -281,12 +395,12 @@ def start_client():
         if role == "White":
             print("You are White. You make the first move.")
             while True:
-                # Input local move and check legality before sending.
+                # Input local move and check legality.
                 while True:
                     my_move = input("Enter your move (or 'exit' to quit): ").strip()
                     if my_move.lower() == "exit":
                         break
-                    if is_move_legal(my_move, role, own_bitmap, opp_bitmap):
+                    if is_move_legal(my_move, role, own_bitmap, opp_bitmap, debug=False):
                         break
                     else:
                         print("Illegal move. Please try again.")
@@ -295,20 +409,38 @@ def start_client():
                     break
 
                 send_msg(s, my_move, session_stats)
-                # Update own board.
                 execute_move(my_move, own_bitmap, opp_bitmap)
                 print("Updated board after your move:")
                 display_boards(white_bitmap, black_bitmap)
+                
+                # Check win conditions after your move.
+                winner = check_win_conditions(white_bitmap, black_bitmap)
+                if winner:
+                    win_msg = f"win: {winner}"
+                    send_msg(s, win_msg, session_stats)
+                    print(win_msg)
+                    break
 
-                # Wait for Black's move.
+                # Wait for opponent's move.
                 opp_move = recv_msg(s_file, session_stats)
                 if opp_move.lower() == "exit":
                     print("Server has quit the session.")
+                    break
+                if opp_move.startswith("win:"):
+                    print(opp_move)
                     break
                 print("Opponent move received:", opp_move)
                 execute_move(opp_move, opp_bitmap, own_bitmap)
                 print("Updated board after opponent's move:")
                 display_boards(white_bitmap, black_bitmap)
+                
+                # Check win conditions after opponent's move.
+                winner = check_win_conditions(white_bitmap, black_bitmap)
+                if winner:
+                    win_msg = f"win: {winner}"
+                    send_msg(s, win_msg, session_stats)
+                    print(win_msg)
+                    break
         elif role == "Black":
             print("You are Black. Waiting for White's move.")
             while True:
@@ -327,7 +459,7 @@ def start_client():
                     my_move = input("Enter your move (or 'exit' to quit): ").strip()
                     if my_move.lower() == "exit":
                         break
-                    if is_move_legal(my_move, role, own_bitmap, opp_bitmap):
+                    if is_move_legal(my_move, role, own_bitmap, opp_bitmap, debug=False):
                         break
                     else:
                         print("Illegal move. Please try again.")
@@ -339,6 +471,13 @@ def start_client():
                 execute_move(my_move, own_bitmap, opp_bitmap)
                 print("Updated board after your move:")
                 display_boards(white_bitmap, black_bitmap)
+
+                # Check win conditions after each move
+                win_message = check_win_conditions(white_bitmap, black_bitmap)
+                if win_message:
+                    print(win_message)
+                    send_msg(s, win_message, session_stats)
+                    break
         else:
             print("Unknown role. Exiting.")
             return

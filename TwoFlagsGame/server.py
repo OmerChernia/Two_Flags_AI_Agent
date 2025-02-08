@@ -65,24 +65,21 @@ def game_loop(conn_white, conn_black, stats, session_start):
                 send_msg(conn_white, "exit", stats)
                 send_msg(conn_black, "exit", stats)
                 return
-            sender_role = "White" if s == conn_white else "Black"
             if msg.lower() == "exit":
-                print(f"{sender_role} client requested exit.")
+                print("A client requested exit.")
                 send_msg(conn_white, "exit", stats)
                 send_msg(conn_black, "exit", stats)
-                elapsed = int(time.time() - session_start)
-                print("********Session ********")
-                print(f"Bytes written: {stats['bytes_written']} Bytes read: {stats['bytes_read']}")
-                print(f"Elapsed time: {elapsed} secs")
-                print("Connection closed")
                 return
+            if msg.startswith("win:"):
+                print(f"Winning condition reached: {msg}")
+                send_msg(conn_white, msg, stats)
+                send_msg(conn_black, msg, stats)
+                return
+            # Relay normal moves.
+            if s == conn_white:
+                send_msg(conn_black, msg, stats)
             else:
-                print(f"{sender_role} move: {msg}")
-                # Relay the move to the opposing client.
-                if s == conn_white:
-                    send_msg(conn_black, msg, stats)
-                else:
-                    send_msg(conn_white, msg, stats)
+                send_msg(conn_white, msg, stats)
 
 def start_server():
     session_stats = {"bytes_read": 0, "bytes_written": 0}
