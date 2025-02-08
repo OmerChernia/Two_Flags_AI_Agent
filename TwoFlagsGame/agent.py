@@ -420,14 +420,61 @@ class AIAgent:
         self.role = role  # "White" or "Black"
         self.white_bitmap = white_bitmap
         self.black_bitmap = black_bitmap
+        # TD learning parameters: initial weights for features, learning rate, and discount factor.
+        self.weights = {'material': 1.0, 'mobility': 0.5}
+        self.alpha = 0.01  # learning rate
+        self.gamma = 0.9   # discount factor
+
+    def extract_features(self, white, black):
+        """
+        Extract features from the board state.
+        For example, we define:
+         - 'material': difference in piece counts (number of pawns for White minus Black)
+         - 'mobility': number of legal moves available (as a dummy mobility measure)
+        """
+        # Count pawns: assuming each pawn is represented as True in the bitmap.
+        white_count = sum(1 for row in white for cell in row if cell)
+        black_count = sum(1 for row in black for cell in row if cell)
+        # Dummy mobility: count legal moves for the current player.
+        if self.role == "White":
+            mobility = len(generate_all_legal_moves("White", white, black))
+        else:
+            mobility = len(generate_all_legal_moves("Black", black, white))
+        return {'material': white_count - black_count, 'mobility': mobility}
+
+    def evaluate_state(self, white, black):
+        """
+        Compute an evaluation value for the board as a weighted sum over features.
+        """
+        features = self.extract_features(white, black)
+        value = sum(self.weights.get(feature, 0) * val for feature, val in features.items())
+        return value
+
+    def td_update(self, old_white, old_black, new_white, new_black, reward):
+        """
+        Update the evaluation weights using the TD learning rule.
+        
+        δ = r + γ * V(new_state) - V(old_state)
+        For each feature f:
+            w_f ← w_f + α * δ * f(old_state)
+        """
+        old_value = self.evaluate_state(old_white, old_black)
+        new_value = self.evaluate_state(new_white, new_black)
+        delta = reward + self.gamma * new_value - old_value
+        features = self.extract_features(old_white, old_black)
+        for feature, f_val in features.items():
+            self.weights[feature] += self.alpha * delta * f_val
+        print("TD update applied. New weights:", self.weights)
 
     def make_move(self, time_limit):
         """
         Uses iterative deepening and minimax search with dynamic search depth.
         Returns the best move found before time runs out.
+        Incorporates a TD update after executing the move.
         """
-        import random
         start_time = time.time()
+        # Capture board state before making the move for TD update later.
+        old_white, old_black = copy_boards(self.white_bitmap, self.black_bitmap)
         
         # Retrieve legal moves.
         if self.role == "White":
@@ -457,18 +504,18 @@ class AIAgent:
             current_best_eval = -float('inf')
             move_evals = []
             
-            # Shuffle legal moves to add randomness in evaluation order.
+            # Shuffle legal moves to add randomness.
             random.shuffle(legal_moves)
             
             for move in legal_moves:
-                new_white, new_black = copy_boards(self.white_bitmap, self.black_bitmap)
+                new_white_sim, new_black_sim = copy_boards(self.white_bitmap, self.black_bitmap)
                 if self.role == "White":
-                    execute_move(move, new_white, new_black, simulate=True)
+                    execute_move(move, new_white_sim, new_black_sim, simulate=True)
                 else:
-                    execute_move(move, new_black, new_white, simulate=True)
+                    execute_move(move, new_black_sim, new_white_sim, simulate=True)
                 
-                move_eval = minimax(new_white, new_black, depth - 1, False, self.role, start_time, time_limit)
-                # Add a tiny random noise to the evaluation
+                move_eval = minimax(new_white_sim, new_black_sim, depth - 1, False, self.role, start_time, time_limit)
+                # Add small random noise for tie-breaking.
                 move_eval += random.uniform(-0.01, 0.01)
                 move_evals.append((move, move_eval))
                 
@@ -476,32 +523,37 @@ class AIAgent:
                     current_best_eval = move_eval
                     current_best = move
 
-            # If multiple moves are nearly equal (within an epsilon), choose one at random.
+            # If multiple moves have almost identical evaluations, pick one at random.
             epsilon = 1e-5
-            best_moves = [m for m, ev in move_evals if abs(ev - current_best_eval) < epsilon]
-            if best_moves:
-                current_best = random.choice(best_moves)
+            nearly_best = [m for m, ev in move_evals if abs(ev - current_best_eval) < epsilon]
+            if nearly_best:
+                current_best = random.choice(nearly_best)
             
             best_move = current_best
             best_eval = current_best_eval
             log(f"[Agent Turn] Depth {depth} search completed. Best eval: {best_eval}")
             depth += 1
         
-        # If no move was found (should not occur because we already checked legal_moves), fallback to a valid move.
+        # Fallback: if no move is found, return 'exit'.
         if best_move is None:
             best_move = "exit"
 
-        # If the chosen move is "exit", do not try to execute it.
+        # If the chosen move is "exit", do not execute it.
         if best_move.lower() == "exit":
             log("[Agent Turn] No legal move available; returning 'exit' without executing move.")
             return best_move
-
-        # For the actual move, execute it *without* simulation.
+        
+        # Execute the chosen move on the actual board.
         if self.role == "White":
             execute_move(best_move, self.white_bitmap, self.black_bitmap, simulate=False)
         else:
             execute_move(best_move, self.black_bitmap, self.white_bitmap, simulate=False)
         log(f"[Agent Turn] Chosen move: {best_move} (eval: {best_eval}, depth reached: {depth-1})")
+        
+        # Capture post-move board state and perform a TD update with immediate reward = 0.
+        new_white, new_black = copy_boards(self.white_bitmap, self.black_bitmap)
+        self.td_update(old_white, old_black, new_white, new_black, reward=0)
+        
         return best_move
 
     def make_move_mcts(self, time_limit):
@@ -621,13 +673,18 @@ def main():
         if winner:
             log(f"Game over: {winner}")
             send_message(sock, f"win: {winner}")
-            # Instead of break, wait for a REPLAY command
+            # Instead of breaking immediately, wait for a REPLAY command.
             replay_cmd = s_file.readline().strip()
             if replay_cmd == "REPLAY":
                 setup_msg = s_file.readline().strip()  # New board setup
-                white_bitmap, black_bitmap = initialize_boards(setup_msg)
+                
+                # Reset the internal board state of the agent.
+                agent.reset_game(setup_msg)
+                # Update the local board variables in case they are used later.
+                white_bitmap, black_bitmap = agent.white_bitmap, agent.black_bitmap
+                # Optionally, reset move counter (or any other per-game state).
+                move_count = 0
                 log("New game started (replay).")
-                # Continue the game loop to play another round...
                 continue
             else:
                 break
