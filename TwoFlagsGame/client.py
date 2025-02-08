@@ -395,7 +395,7 @@ def start_client():
         if role == "White":
             print("You are White. You make the first move.")
             while True:
-                # Input local move and check legality.
+                # Input your move.
                 while True:
                     my_move = input("Enter your move (or 'exit' to quit): ").strip()
                     if my_move.lower() == "exit":
@@ -412,49 +412,59 @@ def start_client():
                 execute_move(my_move, own_bitmap, opp_bitmap)
                 print("Updated board after your move:")
                 display_boards(white_bitmap, black_bitmap)
-                
-                # Check win conditions after your move.
+
+                # Check win condition.
                 winner = check_win_conditions(white_bitmap, black_bitmap)
                 if winner:
                     win_msg = f"win: {winner}"
                     send_msg(s, win_msg, session_stats)
                     print(win_msg)
-                    break
-
+                    # (Game over reached; see below for replay handling.)
                 # Wait for opponent's move.
                 opp_move = recv_msg(s_file, session_stats)
                 if opp_move.lower() == "exit":
                     print("Server has quit the session.")
                     break
+                if opp_move == "REPLAY":
+                    # New game requested: read the new board setup and reinitialize.
+                    setup_msg = recv_msg(s_file, session_stats)
+                    white_bitmap, black_bitmap = initialize_boards(setup_msg)
+                    print("New game started (replay).")
+                    display_boards(white_bitmap, black_bitmap)
+                    continue
                 if opp_move.startswith("win:"):
                     print(opp_move)
-                    break
-                print("Opponent move received:", opp_move)
-                execute_move(opp_move, opp_bitmap, own_bitmap)
-                print("Updated board after opponent's move:")
-                display_boards(white_bitmap, black_bitmap)
-                
-                # Check win conditions after opponent's move.
-                winner = check_win_conditions(white_bitmap, black_bitmap)
-                if winner:
-                    win_msg = f"win: {winner}"
-                    send_msg(s, win_msg, session_stats)
-                    print(win_msg)
-                    break
-        elif role == "Black":
-            print("You are Black. Waiting for White's move.")
-            while True:
-                # Wait for White's move.
-                opp_move = recv_msg(s_file, session_stats)
-                if opp_move.lower() == "exit":
-                    print("Server has quit the session.")
-                    break
+                    # Continue – the server may later send a replay command.
                 print("Opponent move received:", opp_move)
                 execute_move(opp_move, opp_bitmap, own_bitmap)
                 print("Updated board after opponent's move:")
                 display_boards(white_bitmap, black_bitmap)
 
-                # Input local move and check legality.
+                winner = check_win_conditions(white_bitmap, black_bitmap)
+                if winner:
+                    win_msg = f"win: {winner}"
+                    send_msg(s, win_msg, session_stats)
+                    print(win_msg)
+                    # (Do not break—wait for a possible replay command instead.)
+        elif role == "Black":
+            print("You are Black. Waiting for White's move.")
+            while True:
+                opp_move = recv_msg(s_file, session_stats)
+                if opp_move.lower() == "exit":
+                    print("Server has quit the session.")
+                    break
+                if opp_move == "REPLAY":
+                    setup_msg = recv_msg(s_file, session_stats)
+                    white_bitmap, black_bitmap = initialize_boards(setup_msg)
+                    print("New game started (replay).")
+                    display_boards(white_bitmap, black_bitmap)
+                    continue
+                print("Opponent move received:", opp_move)
+                execute_move(opp_move, opp_bitmap, own_bitmap)
+                print("Updated board after opponent's move:")
+                display_boards(white_bitmap, black_bitmap)
+
+                # Get your move.
                 while True:
                     my_move = input("Enter your move (or 'exit' to quit): ").strip()
                     if my_move.lower() == "exit":
@@ -472,12 +482,11 @@ def start_client():
                 print("Updated board after your move:")
                 display_boards(white_bitmap, black_bitmap)
 
-                # Check win conditions after each move
                 win_message = check_win_conditions(white_bitmap, black_bitmap)
                 if win_message:
                     print(win_message)
                     send_msg(s, win_message, session_stats)
-                    break
+                    # (Continue looping so that replay commands can be handled.)
         else:
             print("Unknown role. Exiting.")
             return

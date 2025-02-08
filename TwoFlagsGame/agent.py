@@ -3,6 +3,7 @@ import sys
 import time
 import random
 import copy
+import math
 from client import initialize_boards  # Import the board setup parser
 
 def log(msg):
@@ -11,7 +12,10 @@ def log(msg):
 def send_message(sock, msg):
     """Sends a message (appending a newline) over the socket."""
     full_msg = msg + "\n"
-    sock.sendall(full_msg.encode())
+    try:
+        sock.sendall(full_msg.encode())
+    except BrokenPipeError:
+        log("Warning: Broken pipe encountered when sending message.")
 
 def receive_message(file_obj):
     """Reads one line (i.e. one message) from the file-like socket object."""
@@ -179,14 +183,26 @@ def is_passed_pawn(own_bitmap, opp_bitmap, row, col, side):
                     return False
         return True
 
-# --- NEW EVALUATION FUNCTION ---
+# --- GLOBAL WEIGHTS & TD UPDATE ---
+# These global weights are used by our evaluation function and can be updated via TD learning.
+weights = {
+    "win_score": 1000000,
+    "material": 10,
+    "promotion_bonus": 10000,
+    "advancement": 30,
+    "passed_pawn": 150,
+    "white_advancement": 20,
+    "white_passed_pawn": 100
+}
+
 def evaluate_board_dynamic(white_bitmap, black_bitmap, role):
     """
-    Evaluate the board (using our two-bitmaps) with improved heuristics.
+    Evaluate the board (using our two-bitmaps) with improved heuristics and dynamic weights.
     Evaluation is computed from Black's perspective.
     If role is White, the score is inverted.
     """
-    WIN_SCORE = 1000000
+    global weights
+    WIN_SCORE = weights["win_score"]
     winner = check_win_conditions(white_bitmap, black_bitmap)
     if winner == "Black wins":
         score = WIN_SCORE
@@ -196,27 +212,59 @@ def evaluate_board_dynamic(white_bitmap, black_bitmap, role):
         # Material balance: count pawns (True values indicate a pawn)
         white_count = sum(cell for row in white_bitmap for cell in row)
         black_count = sum(cell for row in black_bitmap for cell in row)
-        score = 10 * (black_count - white_count)
+        score = weights["material"] * (black_count - white_count)
         # Pawn advancement and promotion potential:
         for row in range(8):
             for col in range(8):
                 if black_bitmap[row][col]:
-                    # Add a huge bonus if the pawn is one move away from promotion (promotion row is 7 for Black).
+                    # Add a huge bonus if the pawn is one move away from promotion (promotion row is 6 for Black).
                     if row == 6:
-                        score += 10000
-                    # The farther down (higher row index), the closer to promotion:
-                    advancement = row  # (row 7 is best for Black)
-                    score += 30 * advancement
+                        score += weights["promotion_bonus"]
+                    advancement = row  # Higher row is closer to promotion (row 7)
+                    score += weights["advancement"] * advancement
                     if is_passed_pawn(black_bitmap, white_bitmap, row, col, "Black"):
-                        score += 150 + (30 * advancement)
+                        score += weights["passed_pawn"] + (weights["advancement"] * advancement)
                 elif white_bitmap[row][col]:
-                    # For White, promotion row is 0.
                     advancement = 7 - row
-                    score -= 20 * advancement
+                    score -= weights["white_advancement"] * advancement
                     if is_passed_pawn(white_bitmap, black_bitmap, row, col, "White"):
-                        score -= 100 + (20 * advancement)
-    # Return score from the agent's perspective.
+                        score -= weights["white_passed_pawn"] + (weights["white_advancement"] * advancement)
     return score if role == "Black" else -score
+
+def td_update(state, next_state, reward, alpha=0.01, gamma=0.99):
+    """
+    A simple Temporal Difference (TD) update function.
+    'state' and 'next_state' are tuples: (white_bitmap, black_bitmap, role)
+    This updates the global 'weights' based on the TD error.
+    (This is a very simplified example—more elaborate feature extraction and gradient computation can be used.)
+    """
+    global weights
+    white, black, role = state
+    # Example feature: material difference.
+    white_count = sum(cell for row in white for cell in row)
+    black_count = sum(cell for row in black for cell in row)
+    material_diff = black_count - white_count
+
+    # Example features for pawn advancement.
+    black_advancement = sum(row for row in range(8) for col in range(8) if black[row][col])
+    white_advancement = sum((7 - row) for row in range(8) for col in range(8) if white[row][col])
+    
+    # Construct a simple feature vector.
+    f_state = {
+        "material": material_diff,
+        "advancement": black_advancement,
+        "white_advancement": white_advancement,
+    }
+    
+    V_state = evaluate_board_dynamic(white, black, role)
+    new_white, new_black, role_next = next_state
+    V_next = evaluate_board_dynamic(new_white, new_black, role_next)
+    
+    delta = reward + gamma * V_next - V_state
+    # Update each weight proportionally to its feature value.
+    for key in f_state:
+        if key in weights:
+            weights[key] += alpha * delta * f_state[key]
 
 # --- MINIMAX WITH ITERATIVE DEEPENING SUPPORT ---
 def minimax(white, black, depth, maximizing, role, start_time, time_limit, alpha=-float('inf'), beta=float('inf')):
@@ -264,6 +312,109 @@ def minimax(white, black, depth, maximizing, role, start_time, time_limit, alpha
                 break  # Alpha cutoff.
         return min_eval
 
+# --- MCTS IMPLEMENTATION ---
+
+class MCTSNode:
+    def __init__(self, white, black, move=None, parent=None, role=None):
+        self.white = white
+        self.black = black
+        self.move = move         # The move that led to this state (from the parent)
+        self.parent = parent
+        self.children = []
+        self.visits = 0
+        self.total_reward = 0.0
+        self.role = role         # Role perspective ("White" or "Black")
+
+    def is_terminal(self):
+        return check_win_conditions(self.white, self.black) is not None
+
+    def expand(self):
+        if self.children:
+            return self.children
+        if self.role == "White":
+            moves = generate_all_legal_moves("White", self.white, self.black)
+        else:
+            moves = generate_all_legal_moves("Black", self.black, self.white)
+        for move in moves:
+            new_white, new_black = copy_boards(self.white, self.black)
+            if self.role == "White":
+                execute_move(move, new_white, new_black, simulate=True)
+            else:
+                execute_move(move, new_black, new_white, simulate=True)
+            child = MCTSNode(new_white, new_black, move=move, parent=self, role=self.role)
+            self.children.append(child)
+        return self.children
+
+def mcts_select(node):
+    best_child = None
+    best_value = -float('inf')
+    for child in node.children:
+        # Use UCB1 for balancing exploration and exploitation.
+        exploitation = child.total_reward / (child.visits + 1e-5)
+        exploration = 1.41 * math.sqrt(math.log(node.visits + 1) / (child.visits + 1e-5))
+        ucb = exploitation + exploration
+        if ucb > best_value:
+            best_value = ucb
+            best_child = child
+    return best_child
+
+def mcts_rollout(node, rollout_depth=10):
+    current_white, current_black = copy_boards(node.white, node.black)
+    current_role = node.role
+    for _ in range(rollout_depth):
+        winner = check_win_conditions(current_white, current_black)
+        if winner:
+            # Return reward +1 for win from node's perspective, -1 for loss.
+            return 1 if winner == f"{node.role} wins" else -1
+        # Generate a random move.
+        if current_role == "White":
+            moves = generate_all_legal_moves("White", current_white, current_black)
+        else:
+            moves = generate_all_legal_moves("Black", current_black, current_white)
+        if not moves:
+            break
+        move = random.choice(moves)
+        if current_role == "White":
+            execute_move(move, current_white, current_black, simulate=True)
+        else:
+            execute_move(move, current_black, current_white, simulate=True)
+        # Switch perspective for the next move.
+        current_role = "Black" if current_role == "White" else "White"
+    return 0  # If no terminal state was reached.
+
+def mcts_backpropagate(node, reward):
+    while node is not None:
+        node.visits += 1
+        node.total_reward += reward
+        node = node.parent
+
+def mcts_search(white, black, role, time_limit):
+    """
+    Run MCTS for a given time limit (in seconds) and return the best move.
+    """
+    start_time = time.time()
+    root = MCTSNode(white, black, role=role)
+    root.expand()
+    iterations = 0
+    while time.time() - start_time < time_limit:
+        node = root
+        # Selection: traverse the tree.
+        while node.children:
+            node = mcts_select(node)
+        # Expansion.
+        if not node.is_terminal():
+            node.expand()
+            if node.children:
+                node = random.choice(node.children)
+        # Simulation (rollout).
+        reward = mcts_rollout(node)
+        # Backpropagation.
+        mcts_backpropagate(node, reward)
+        iterations += 1
+    # Select the move that has the highest visit count.
+    best_child = max(root.children, key=lambda c: c.visits) if root.children else None
+    return best_child.move if best_child else None
+
 class AIAgent:
     def __init__(self, role, white_bitmap, black_bitmap):
         self.role = role  # "White" or "Black"
@@ -275,7 +426,7 @@ class AIAgent:
         Uses iterative deepening and minimax search with dynamic search depth.
         Returns the best move found before time runs out.
         """
-        import random  # ensure random is imported if not already
+        import random
         start_time = time.time()
         
         # Retrieve legal moves.
@@ -285,62 +436,107 @@ class AIAgent:
             legal_moves = generate_all_legal_moves("Black", self.black_bitmap, self.white_bitmap)
         
         if not legal_moves:
-            print("[Agent Turn] No legal moves available!")
-            return None
+            log("[Agent Turn] No legal moves available!")
+            return "exit"
 
         best_move = None
         best_eval = -float('inf')
         depth = 1
-        max_depth_allowed = 5  # Set a hard cap for iterative deepening
-
+        max_depth_allowed = 5  # Hard cap for iterative deepening
+        
         while True:
-            try:
-                elapsed = time.time() - start_time
-                remaining_time = time_limit - elapsed
-                # Break if time is nearly up or maximum depth reached.
-                if remaining_time < 0.05 or depth > max_depth_allowed:
-                    print(f"[Agent Turn] Breaking out of iterative deepening: remaining time {remaining_time:.2f}s, depth {depth}")
-                    break
-
-                print(f"[Agent Turn] Iterative deepening: starting search at depth {depth}, remaining time: {remaining_time:.2f}s")
-                
-                current_best = None
-                current_best_eval = -float('inf')
-                
-                # Evaluate each move at the current search depth.
-                for move in legal_moves:
-                    new_white, new_black = copy_boards(self.white_bitmap, self.black_bitmap)
-                    if self.role == "White":
-                        execute_move(move, new_white, new_black, simulate=True)
-                    else:
-                        execute_move(move, new_black, new_white, simulate=True)
-                    
-                    move_eval = minimax(new_white, new_black, depth - 1, False, self.role, start_time, time_limit)
-                    if move_eval > current_best_eval:
-                        current_best_eval = move_eval
-                        current_best = move
-                
-                best_move = current_best
-                best_eval = current_best_eval
-                print(f"[Agent Turn] Depth {depth} search completed. Best eval: {best_eval}")
-                depth += 1
-            
-            except TimeoutError:
-                print("[Agent Turn] Search timed out during iterative deepening.")
+            elapsed = time.time() - start_time
+            remaining_time = time_limit - elapsed
+            if remaining_time < 0.05 or depth > max_depth_allowed:
+                log(f"[Agent Turn] Breaking out of iterative deepening: remaining time {remaining_time:.2f}s, depth {depth}")
                 break
 
-        # If no move was found (unlikely), select one at random.
-        if best_move is None:
-            best_move = random.choice(legal_moves)
+            log(f"[Agent Turn] Iterative deepening: starting search at depth {depth}, remaining time: {remaining_time:.2f}s")
+            
+            current_best = None
+            current_best_eval = -float('inf')
+            move_evals = []
+            
+            # Shuffle legal moves to add randomness in evaluation order.
+            random.shuffle(legal_moves)
+            
+            for move in legal_moves:
+                new_white, new_black = copy_boards(self.white_bitmap, self.black_bitmap)
+                if self.role == "White":
+                    execute_move(move, new_white, new_black, simulate=True)
+                else:
+                    execute_move(move, new_black, new_white, simulate=True)
+                
+                move_eval = minimax(new_white, new_black, depth - 1, False, self.role, start_time, time_limit)
+                # Add a tiny random noise to the evaluation
+                move_eval += random.uniform(-0.01, 0.01)
+                move_evals.append((move, move_eval))
+                
+                if move_eval > current_best_eval:
+                    current_best_eval = move_eval
+                    current_best = move
+
+            # If multiple moves are nearly equal (within an epsilon), choose one at random.
+            epsilon = 1e-5
+            best_moves = [m for m, ev in move_evals if abs(ev - current_best_eval) < epsilon]
+            if best_moves:
+                current_best = random.choice(best_moves)
+            
+            best_move = current_best
+            best_eval = current_best_eval
+            log(f"[Agent Turn] Depth {depth} search completed. Best eval: {best_eval}")
+            depth += 1
         
-        # For the actual move, use simulate=False so that logging (if any) occurs.
+        # If no move was found (should not occur because we already checked legal_moves), fallback to a valid move.
+        if best_move is None:
+            best_move = "exit"
+
+        # If the chosen move is "exit", do not try to execute it.
+        if best_move.lower() == "exit":
+            log("[Agent Turn] No legal move available; returning 'exit' without executing move.")
+            return best_move
+
+        # For the actual move, execute it *without* simulation.
         if self.role == "White":
             execute_move(best_move, self.white_bitmap, self.black_bitmap, simulate=False)
         else:
             execute_move(best_move, self.black_bitmap, self.white_bitmap, simulate=False)
-
-        print(f"[Agent Turn] Chosen move: {best_move} (eval: {best_eval}, depth reached: {depth-1})")
+        log(f"[Agent Turn] Chosen move: {best_move} (eval: {best_eval}, depth reached: {depth-1})")
         return best_move
+
+    def make_move_mcts(self, time_limit):
+        """
+        Uses Monte Carlo Tree Search (MCTS) to select a move within the given time limit.
+        """
+        # In this simplified example, the current board state is used as the root.
+        if self.role == "White":
+            current_white = self.white_bitmap
+            current_black = self.black_bitmap
+        else:
+            current_white = self.white_bitmap
+            current_black = self.black_bitmap
+        move = mcts_search(current_white, current_black, self.role, time_limit)
+        if move is None:
+            # Fallback to a random move if MCTS fails.
+            if self.role == "White":
+                legal_moves = generate_all_legal_moves("White", self.white_bitmap, self.black_bitmap)
+            else:
+                legal_moves = generate_all_legal_moves("Black", self.black_bitmap, self.white_bitmap)
+            move = random.choice(legal_moves) if legal_moves else "exit"
+        # Execute the chosen move on the actual (non-simulated) board.
+        if self.role == "White":
+            execute_move(move, self.white_bitmap, self.black_bitmap, simulate=False)
+        else:
+            execute_move(move, self.black_bitmap, self.white_bitmap, simulate=False)
+        log(f"[Agent Turn] MCTS selected move: {move}")
+        return move
+
+    def reset_game(self, setup_msg):
+        """
+        Reset the agent's board state from a new setup message.
+        """
+        self.white_bitmap, self.black_bitmap = initialize_boards(setup_msg)
+        log("Agent game state reset for a new game.")
 
 def main():
     host = "127.0.0.1"
@@ -425,7 +621,16 @@ def main():
         if winner:
             log(f"Game over: {winner}")
             send_message(sock, f"win: {winner}")
-            break
+            # Instead of break, wait for a REPLAY command
+            replay_cmd = s_file.readline().strip()
+            if replay_cmd == "REPLAY":
+                setup_msg = s_file.readline().strip()  # New board setup
+                white_bitmap, black_bitmap = initialize_boards(setup_msg)
+                log("New game started (replay).")
+                # Continue the game loop to play another round...
+                continue
+            else:
+                break
         
         move_count += 1
     

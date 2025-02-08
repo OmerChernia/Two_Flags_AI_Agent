@@ -376,21 +376,24 @@ def start_agent():
                 print("Updated board after agent's move:")
                 display_boards(white_bitmap, black_bitmap)
                 
-                # Check win condition.
                 winner = check_win_conditions(white_bitmap, black_bitmap)
                 if winner:
                     win_msg = f"win: {winner}"
                     send_msg(s, win_msg, session_stats)
                     print(win_msg)
                     break
-
                 opp_move = recv_msg(s_file, session_stats)
+                if opp_move == "REPLAY":
+                    setup_msg = recv_msg(s_file, session_stats)
+                    white_bitmap, black_bitmap = initialize_boards(setup_msg)
+                    print("New game started (replay).")
+                    display_boards(white_bitmap, black_bitmap)
+                    continue
                 if opp_move.lower() == "exit":
                     print("Server has quit the session.")
                     break
                 if opp_move.startswith("win:"):
                     print(opp_move)
-                    break
                 print("Opponent move received:", opp_move)
                 execute_move(opp_move, opp_bitmap, own_bitmap)
                 print("Updated board after opponent's move:")
@@ -405,8 +408,13 @@ def start_agent():
         elif role == "Black":
             print("You are Black. Waiting for White's move.")
             while True:
-                # Wait for opponent's move.
                 opp_move = recv_msg(s_file, session_stats)
+                if opp_move == "REPLAY":
+                    setup_msg = recv_msg(s_file, session_stats)
+                    white_bitmap, black_bitmap = initialize_boards(setup_msg)
+                    print("New game started (replay).")
+                    display_boards(white_bitmap, black_bitmap)
+                    continue
                 if opp_move.lower() == "exit":
                     print("Server has quit the session.")
                     break
@@ -414,8 +422,7 @@ def start_agent():
                 execute_move(opp_move, opp_bitmap, own_bitmap)
                 print("Updated board after opponent's move:")
                 display_boards(white_bitmap, black_bitmap)
-                
-                # Agent generates a random legal move.
+
                 legal_moves = generate_all_legal_moves(role, own_bitmap, opp_bitmap)
                 if not legal_moves:
                     print("No legal moves available. Exiting.")
@@ -427,8 +434,6 @@ def start_agent():
                 execute_move(my_move, own_bitmap, opp_bitmap)
                 print("Updated board after agent's move:")
                 display_boards(white_bitmap, black_bitmap)
-                
-                # Check win conditions after agent's move.
                 winner = check_win_conditions(white_bitmap, black_bitmap)
                 if winner:
                     win_msg = f"win: {winner}"

@@ -86,6 +86,13 @@ class SpectatorClient(threading.Thread):
             except:
                 pass
 
+    def send_message(self, msg):
+        try:
+            full_msg = msg + "\n"
+            self.sock.sendall(full_msg.encode())
+        except Exception as e:
+            print("Spectator send error:", e)
+
     def stop(self):
         self.running = False
         try:
@@ -149,6 +156,9 @@ class PawnChessGUI:
         self.status_label.pack(pady=10)
         self.canvas = tk.Canvas(self.game_frame, width=500, height=500)
         self.canvas.pack(pady=10)
+        # Add Replay Button for spectator mode.
+        self.replay_button = tk.Button(self.game_frame, text="Replay", command=self.request_replay)
+        self.replay_button.pack(pady=5)
         self.game_frame.pack_forget()
         
         # Flag to indicate whether a custom board has been loaded.
@@ -650,6 +660,17 @@ class PawnChessGUI:
         self.my_turn = flag
         if flag:
             self.status_label.config(text="Your turn!")
+
+    def request_replay(self):
+        """
+        Called when the Replay button is clicked.
+        Sends a replay command to the server via the spectator connection.
+        """
+        if hasattr(self, 'spectator_client') and self.spectator_client is not None:
+            self.spectator_client.send_message("REPLAY")
+            self.status_label.config(text="Replay requested. Waiting for new game setup...")
+        else:
+            print("No spectator connection available.")
 
 if __name__ == "__main__":
     root = tk.Tk()
