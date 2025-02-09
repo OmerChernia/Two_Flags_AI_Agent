@@ -399,15 +399,22 @@ def start_client():
         if role == "White":
             print("You are White. You make the first move.")
             while True:
-                # Input your move.
-                while True:
-                    my_move = input("Enter your move (or 'exit' to quit): ").strip()
-                    if my_move.lower() == "exit":
-                        break
-                    if is_move_legal(my_move, role, own_bitmap, opp_bitmap, debug=False):
-                        break
-                    else:
-                        print("Illegal move. Please try again.")
+                all_moves = generate_all_legal_moves(role, own_bitmap, opp_bitmap)
+                if not all_moves:
+                    # No legal moves => opponent wins.
+                    opponent = "White" if role == "Black" else "Black"
+                    print(f"No moves left for {role}. {opponent} wins!")
+                    win_msg = f"win: {opponent}"
+                    send_msg(s, win_msg, session_stats)
+                    break
+
+                my_move = input("Enter your move (or 'exit' to quit): ").strip()
+                if my_move.lower() == "exit":
+                    break
+                if is_move_legal(my_move, role, own_bitmap, opp_bitmap, debug=False):
+                    break
+                else:
+                    print("Illegal move. Please try again.")
                 if my_move.lower() == "exit":
                     send_msg(s, my_move, session_stats)
                     break
@@ -454,6 +461,15 @@ def start_client():
 
                 # Get your move.
                 while True:
+                    all_moves = generate_all_legal_moves(role, own_bitmap, opp_bitmap)
+                    if not all_moves:
+                        # No legal moves => opponent wins.
+                        opponent = "White" if role == "Black" else "Black"
+                        print(f"No moves left for {role}. {opponent} wins!")
+                        win_msg = f"win: {opponent}"
+                        send_msg(s, win_msg, session_stats)
+                        break
+
                     my_move = input("Enter your move (or 'exit' to quit): ").strip()
                     if my_move.lower() == "exit":
                         break

@@ -655,10 +655,23 @@ class PawnChessGUI:
             messagebox.showerror("Error",
                                  "No custom board setup defined. Please edit the board setup first.")
 
-    def set_my_turn(self, flag):
-        self.my_turn = flag
-        if flag:
-            self.status_label.config(text="Your turn!")
+    def set_my_turn(self, my_turn):
+        self.my_turn = my_turn
+        if self.my_turn:
+            # Immediately check if we have legal moves for self.role.
+            moves = generate_all_legal_moves(self.role, self.white_bitmap, self.black_bitmap) \
+                if self.role == "White" else \
+                generate_all_legal_moves(self.role, self.black_bitmap, self.white_bitmap)
+            if not moves:
+                opponent = "White" if self.role == "Black" else "Black"
+                no_moves_msg = f"win: {opponent}"
+                print(f"No moves for {self.role}. {opponent} wins!")
+                send_msg(self.sock, no_moves_msg, self.session_stats)
+                self.my_turn = False
+            else:
+                self.status_label.config(text=f"{self.role}'s turn. Pick a move.")
+        else:
+            self.status_label.config(text="Waiting for opponent's move...")
 
 if __name__ == "__main__":
     root = tk.Tk()

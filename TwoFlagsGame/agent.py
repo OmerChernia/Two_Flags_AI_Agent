@@ -421,175 +421,254 @@ class AIAgent:
         self.role = role  # "White" or "Black"
         self.white_bitmap = white_bitmap
         self.black_bitmap = black_bitmap
-        # TD learning parameters: initial weights for features, learning rate, and discount factor.
-        self.weights = {'material': 1.0, 'mobility': 0.5}
-        self.alpha = 0.01  # learning rate
-        self.gamma = 0.9   # discount factor
+        # Optional transposition table: maps a board-hash to (depth, best_score, best_move)
+        self.transposition_table = {}
+        # Keep track of timing information
+        self.time_limit = 10  # default 10 seconds for demonstration
+        self.start_time = None
+        # Learning placeholders (not fully implemented here)
+        self.learning_enabled = False
+        self.learning_data = []
 
-    def extract_features(self, white, black):
+    def make_move(self, time_limit=10, move_count=0):
         """
-        Extract features from the board state.
-        For example, we define:
-         - 'material': difference in piece counts (number of pawns for White minus Black)
-         - 'mobility': number of legal moves available (as a dummy mobility measure)
+        Produces a move within a given time limit, using alpha-beta search.
+        The search depth is adjusted based on how many moves have already been played.
         """
-        # Count pawns: assuming each pawn is represented as True in the bitmap.
-        white_count = sum(1 for row in white for cell in row if cell)
-        black_count = sum(1 for row in black for cell in row if cell)
-        # Dummy mobility: count legal moves for the current player.
-        if self.role == "White":
-            mobility = len(generate_all_legal_moves("White", white, black))
+        self.time_limit = time_limit
+        self.start_time = time.time()
+
+        # DYNAMIC DEPTH SCHEDULING:
+        # For the first 10 moves of the entire game, search up to depth 4;
+        # afterwards, allow deeper search (depth 8 or 9). Adjust as you like.
+        if move_count < 10:
+            max_depth = 4
         else:
-            mobility = len(generate_all_legal_moves("Black", black, white))
-        return {'material': white_count - black_count, 'mobility': mobility}
+            max_depth = 9
 
-    def evaluate_state(self, white, black):
-        """
-        Compute an evaluation value for the board as a weighted sum over features.
-        """
-        features = self.extract_features(white, black)
-        value = sum(self.weights.get(feature, 0) * val for feature, val in features.items())
-        return value
+        moves = self._generate_legal_moves_for_role()
+        if not moves:
+            # Declare the other side as the winner if we can't move.
+            opponent = "White" if self.role == "Black" else "Black"
+            print(f"No legal moves for {self.role}. {opponent} wins!")
+            return f"win: {opponent}"
 
-    def td_update(self, old_white, old_black, new_white, new_black, reward):
-        """
-        Update the evaluation weights using the TD learning rule.
-        
-        δ = r + γ * V(new_state) - V(old_state)
-        For each feature f:
-            w_f ← w_f + α * δ * f(old_state)
-        """
-        old_value = self.evaluate_state(old_white, old_black)
-        new_value = self.evaluate_state(new_white, new_black)
-        delta = reward + self.gamma * new_value - old_value
-        features = self.extract_features(old_white, old_black)
-        for feature, f_val in features.items():
-            self.weights[feature] += self.alpha * delta * f_val
-        print("TD update applied. New weights:", self.weights)
+        # If there's an immediate winning promotion, take it.
+        winning_move = self._find_immediate_promotion(moves)
+        if winning_move:
+            if self.role == "White":
+                execute_move(winning_move, self.white_bitmap, self.black_bitmap, simulate=False)
+            else:
+                execute_move(winning_move, self.black_bitmap, self.white_bitmap, simulate=False)
+            
+            self._print_turn_summary(
+                depth_reached=0,
+                move_chosen=winning_move,
+                start_time=self.start_time,
+                time_limit=self.time_limit
+            )
+            return winning_move
 
-    def make_move(self, time_limit):
-        """
-        Uses iterative deepening and minimax search with dynamic search depth.
-        Returns the best move found before time runs out.
-        Incorporates a TD update after executing the move.
-        """
-        start_time = time.time()
-        # Capture board state before making the move for TD update later.
-        old_white, old_black = copy_boards(self.white_bitmap, self.black_bitmap)
-        
-        # Retrieve legal moves.
-        if self.role == "White":
-            legal_moves = generate_all_legal_moves("White", self.white_bitmap, self.black_bitmap)
-        else:
-            legal_moves = generate_all_legal_moves("Black", self.black_bitmap, self.white_bitmap)
-        
-        if not legal_moves:
-            log("[Agent Turn] No legal moves available!")
-            return "exit"
+        best_move = moves[0]
+        best_score = float('-inf') if self.role == "White" else float('inf')
+        depth_reached = 1
 
-        best_move = None
-        best_eval = -float('inf')
-        depth = 1
-        max_depth_allowed = 5  # Hard cap for iterative deepening
-        
-        while True:
-            elapsed = time.time() - start_time
-            remaining_time = time_limit - elapsed
-            if remaining_time < 0.05 or depth > max_depth_allowed:
-                log(f"[Agent Turn] Breaking out of iterative deepening: remaining time {remaining_time:.2f}s, depth {depth}")
+        # Perform a simple iterative deepening from depth=1 up to max_depth
+        for depth in range(1, max_depth + 1):
+            candidate_move, candidate_score = self._iterative_search(depth)
+            if candidate_move is not None:
+                best_move, best_score = candidate_move, candidate_score
+                depth_reached = depth
+            # Check time limit after each iteration
+            if time.time() - self.start_time > self.time_limit:
                 break
 
-            log(f"[Agent Turn] Iterative deepening: starting search at depth {depth}, remaining time: {remaining_time:.2f}s")
-            
-            current_best = None
-            current_best_eval = -float('inf')
-            move_evals = []
-            
-            # Shuffle legal moves to add randomness.
-            random.shuffle(legal_moves)
-            
-            for move in legal_moves:
-                new_white_sim, new_black_sim = copy_boards(self.white_bitmap, self.black_bitmap)
-                if self.role == "White":
-                    execute_move(move, new_white_sim, new_black_sim, simulate=True)
-                else:
-                    execute_move(move, new_black_sim, new_white_sim, simulate=True)
-                
-                move_eval = minimax(new_white_sim, new_black_sim, depth - 1, False, self.role, start_time, time_limit)
-                # Add small random noise for tie-breaking.
-                move_eval += random.uniform(-0.01, 0.01)
-                move_evals.append((move, move_eval))
-                
-                if move_eval > current_best_eval:
-                    current_best_eval = move_eval
-                    current_best = move
+        # Execute the best move found
+        if best_move.lower() != "exit":
+            if self.role == "White":
+                execute_move(best_move, self.white_bitmap, self.black_bitmap, simulate=False)
+            else:
+                execute_move(best_move, self.black_bitmap, self.white_bitmap, simulate=False)
 
-            # If multiple moves have almost identical evaluations, pick one at random.
-            epsilon = 1e-5
-            nearly_best = [m for m, ev in move_evals if abs(ev - current_best_eval) < epsilon]
-            if nearly_best:
-                current_best = random.choice(nearly_best)
-            
-            best_move = current_best
-            best_eval = current_best_eval
-            log(f"[Agent Turn] Depth {depth} search completed. Best eval: {best_eval}")
-            depth += 1
-        
-        # Fallback: if no move is found, return 'exit'.
-        if best_move is None:
-            best_move = "exit"
-
-        # If the chosen move is "exit", do not execute it.
-        if best_move.lower() == "exit":
-            log("[Agent Turn] No legal move available; returning 'exit' without executing move.")
-            return best_move
-        
-        # Execute the chosen move on the actual board.
-        if self.role == "White":
-            execute_move(best_move, self.white_bitmap, self.black_bitmap, simulate=False)
-        else:
-            execute_move(best_move, self.black_bitmap, self.white_bitmap, simulate=False)
-        log(f"[Agent Turn] Chosen move: {best_move} (eval: {best_eval}, depth reached: {depth-1})")
-        
-        # Capture post-move board state and perform a TD update with immediate reward = 0.
-        new_white, new_black = copy_boards(self.white_bitmap, self.black_bitmap)
-        self.td_update(old_white, old_black, new_white, new_black, reward=0)
-        
+        # Print a final summary for this turn
+        self._print_turn_summary(
+            depth_reached=depth_reached,
+            move_chosen=best_move,
+            start_time=self.start_time,
+            time_limit=self.time_limit
+        )
         return best_move
 
-    def make_move_mcts(self, time_limit):
-        """
-        Uses Monte Carlo Tree Search (MCTS) to select a move within the given time limit.
-        """
-        # In this simplified example, the current board state is used as the root.
-        if self.role == "White":
-            current_white = self.white_bitmap
-            current_black = self.black_bitmap
-        else:
-            current_white = self.white_bitmap
-            current_black = self.black_bitmap
-        move = mcts_search(current_white, current_black, self.role, time_limit)
-        if move is None:
-            # Fallback to a random move if MCTS fails.
+    def _iterative_search(self, depth):
+        moves = self._generate_legal_moves_for_role()
+        if not moves:
+            return "exit", self._evaluate_terminal()
+
+        best_move = None
+        best_score = float('-inf') if self.role == "White" else float('inf')
+        alpha = float('-inf')
+        beta = float('inf')
+
+        for move in moves:
+            if time.time() - self.start_time > self.time_limit:
+                break
+
+            w_copy = copy.deepcopy(self.white_bitmap)
+            b_copy = copy.deepcopy(self.black_bitmap)
+
             if self.role == "White":
-                legal_moves = generate_all_legal_moves("White", self.white_bitmap, self.black_bitmap)
+                execute_move(move, w_copy, b_copy, simulate=True)
+                score = self._alpha_beta(w_copy, b_copy, depth - 1, alpha, beta, "Black")
+                if score > best_score:
+                    best_score = score
+                    best_move = move
+                alpha = max(alpha, best_score)
+                if beta <= alpha:
+                    break
             else:
-                legal_moves = generate_all_legal_moves("Black", self.black_bitmap, self.white_bitmap)
-            move = random.choice(legal_moves) if legal_moves else "exit"
-        # Execute the chosen move on the actual (non-simulated) board.
-        if self.role == "White":
-            execute_move(move, self.white_bitmap, self.black_bitmap, simulate=False)
+                execute_move(move, b_copy, w_copy, simulate=True)
+                score = self._alpha_beta(w_copy, b_copy, depth - 1, alpha, beta, "White")
+                if score < best_score:
+                    best_score = score
+                    best_move = move
+                beta = min(beta, best_score)
+                if beta <= alpha:
+                    break
+
+        return best_move, best_score
+
+    def _alpha_beta(self, white_bitmap, black_bitmap, depth, alpha, beta, role):
+        if time.time() - self.start_time > self.time_limit:
+            return self._evaluate_position(white_bitmap, black_bitmap)
+
+        # Terminal check
+        winner = check_win_conditions(white_bitmap, black_bitmap)
+        if winner or depth == 0:
+            return self._evaluate_position(white_bitmap, black_bitmap)
+
+        # Transposition table usage
+        state_key = self._hash_position(white_bitmap, black_bitmap, role)
+        if state_key in self.transposition_table:
+            stored_depth, stored_score, stored_move = self.transposition_table[state_key]
+            if stored_depth >= depth:
+                return stored_score
+
+        moves = generate_all_legal_moves(role, white_bitmap, black_bitmap)
+        if not moves:
+            return -9999 if role == "White" else 9999
+
+        if role == "White":
+            best_score = float('-inf')
+            for move in moves:
+                if time.time() - self.start_time > self.time_limit:
+                    break
+                w_copy = copy.deepcopy(white_bitmap)
+                b_copy = copy.deepcopy(black_bitmap)
+                execute_move(move, w_copy, b_copy, simulate=True)
+                score = self._alpha_beta(w_copy, b_copy, depth - 1, alpha, beta, "Black")
+                best_score = max(best_score, score)
+                alpha = max(alpha, best_score)
+                if beta <= alpha:
+                    break
         else:
-            execute_move(move, self.black_bitmap, self.white_bitmap, simulate=False)
-        log(f"[Agent Turn] MCTS selected move: {move}")
-        return move
+            best_score = float('inf')
+            for move in moves:
+                if time.time() - self.start_time > self.time_limit:
+                    break
+                w_copy = copy.deepcopy(white_bitmap)
+                b_copy = copy.deepcopy(black_bitmap)
+                execute_move(move, b_copy, w_copy, simulate=True)
+                score = self._alpha_beta(w_copy, b_copy, depth - 1, alpha, beta, "White")
+                best_score = min(best_score, score)
+                beta = min(beta, best_score)
+                if beta <= alpha:
+                    break
+
+        self.transposition_table[state_key] = (depth, best_score, None)
+        return best_score
+
+    def _evaluate_position(self, white_bitmap, black_bitmap):
+        """
+        Basic evaluation: +10 for each White pawn, -10 for each Black pawn,
+        plus a small row-based bonus to encourage forward movement.
+        """
+        white_score = 0
+        black_score = 0
+        for row in range(8):
+            for col in range(8):
+                if white_bitmap[row][col]:
+                    white_score += 10 + (7 - row)  # small bonus for being further down
+                if black_bitmap[row][col]:
+                    black_score += 10 + row       # small bonus for being further up
+        return white_score - black_score
+
+    def _evaluate_terminal(self):
+        if self.role == "White":
+            return -9999
+        else:
+            return 9999
+
+    def _generate_legal_moves_for_role(self):
+        if self.role == "White":
+            return generate_all_legal_moves("White", self.white_bitmap, self.black_bitmap)
+        else:
+            return generate_all_legal_moves("Black", self.black_bitmap, self.white_bitmap)
+
+    def _find_immediate_promotion(self, moves):
+        for move in moves:
+            dst = move[2:]
+            dst_row, _ = convert_coord(dst)
+            if self.role == "White" and dst_row == 0:
+                return move
+            if self.role == "Black" and dst_row == 7:
+                return move
+        return None
+
+    def _hash_position(self, white_bitmap, black_bitmap, role):
+        bits = [role]
+        for row in range(8):
+            for col in range(8):
+                w = '1' if white_bitmap[row][col] else '0'
+                b = '1' if black_bitmap[row][col] else '0'
+                bits.append(w + b)
+        return ''.join(bits)
+
+    # SINGLE SUMMARY PRINT
+    def _print_turn_summary(self, depth_reached, move_chosen, start_time, time_limit):
+        elapsed = time.time() - start_time
+        time_left = time_limit - elapsed
+        print(
+            f"[Agent {self.role}] "
+            f"Depth reached: {depth_reached}, "
+            f"Move chosen: {move_chosen}, "
+            f"Time spent: {elapsed:.2f}s, "
+            f"Time left: {max(time_left, 0):.2f}s"
+        )
 
     def reset_game(self, setup_msg):
-        """
-        Reset the agent's board state from a new setup message.
-        """
         self.white_bitmap, self.black_bitmap = initialize_boards(setup_msg)
-        log("Agent game state reset for a new game.")
+        self.transposition_table.clear()
+
+    # -----------------------------------
+    # Learning or Optimization (Placeholder)
+    # -----------------------------------
+    def train(self, training_data):
+        """
+        Example stub for a learning routine. 
+        Actual RL or supervised learning code would go here.
+        This might store updates to self.learning_data or 
+        adjust parameters for _evaluate_position.
+        """
+        if not self.learning_enabled:
+            return
+
+        # Pseudocode if we had a param-based evaluation:
+        #   for board_state, outcome in training_data:
+        #       # Adjust evaluation function parameters
+        #       # e.g., using gradient descent or Q-learning
+        #       pass
+
+        print("Learning routine is not implemented yet.")
 
 def main():
     host = "127.0.0.1"
@@ -652,7 +731,7 @@ def main():
     
     while True:
         if (role == "White" and move_count % 2 == 0) or (role == "Black" and move_count % 2 == 1):
-            move = agent.make_move(600)
+            move = agent.make_move(600, move_count)
             log(f"Agent move: {move}")
             send_message(sock, move)
             if move.lower() == "exit":
