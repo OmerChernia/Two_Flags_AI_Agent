@@ -187,13 +187,13 @@ def is_passed_pawn(own_bitmap, opp_bitmap, row, col, side):
 # --- GLOBAL WEIGHTS & TD UPDATE ---
 # These global weights are used by our evaluation function and can be updated via TD learning.
 weights = {
-    "win_score": 1000000,
+    "win_score": 10000,
     "material": 10,
-    "promotion_bonus": 10000,
+    "promotion_bonus": 1000,
     "advancement": 30,
-    "passed_pawn": 150,
-    "white_advancement": 20,
-    "white_passed_pawn": 100
+    "passed_pawn": 250,
+    "white_advancement": 30,
+    "white_passed_pawn": 150
 }
 
 def evaluate_board_dynamic(white_bitmap, black_bitmap, role):
@@ -303,9 +303,9 @@ def minimax(white, black, depth, maximizing, role, start_time, time_limit, alpha
         for move in moves:
             new_white, new_black = copy_boards(white, black)
             if role == "White":
-                execute_move(move, new_black, new_white, simulate=True)
-            else:
                 execute_move(move, new_white, new_black, simulate=True)
+            else:
+                execute_move(move, new_black, new_white, simulate=True)
             eval_val = minimax(new_white, new_black, depth - 1, True, role, start_time, time_limit, alpha, beta)
             min_eval = min(min_eval, eval_val)
             beta = min(beta, eval_val)
@@ -319,14 +319,90 @@ class AIAgent:
         self.role = role  # "White" or "Black"
         self.white_bitmap = white_bitmap
         self.black_bitmap = black_bitmap
-        # Optional transposition table: maps a board-hash to (depth, best_score, best_move)
         self.transposition_table = {}
-        # Keep track of timing information
-        self.time_limit = 10  # default 10 seconds for demonstration
+        self.time_limit = 10  # default; used for move search
         self.start_time = None
-        # Learning placeholders (not fully implemented here)
         self.learning_enabled = False
         self.learning_data = []
+        # Attributes used for pondering.
+        self.ponder_best_move = None
+        self.ponder_best_score = None
+        self.ponder_depth = 0
+
+    def start_pondering(self):
+        """Begins background pondering during the opponent's turn."""
+        import threading
+        self.ponder_stop = threading.Event()
+        self.ponder_thread = threading.Thread(target=self.ponder_loop)
+        self.ponder_thread.daemon = True  # Allows the thread to exit when main program exits.
+        self.ponder_thread.start()
+
+    def stop_pondering(self):
+        """Stops the background pondering thread."""
+        if hasattr(self, "ponder_stop"):
+            self.ponder_stop.set()
+            self.ponder_thread.join()
+
+    def ponder_loop(self):
+        """
+        Continuously expands the search tree,
+        using iterative deepening in the background.
+        """
+        current_depth = 1
+        while not self.ponder_stop.is_set():
+            try:
+                candidate_move, candidate_score = self._iterative_search_ponder(current_depth)
+                self.ponder_best_move = candidate_move
+                self.ponder_best_score = candidate_score
+                self.ponder_depth = current_depth
+                # Optionally, log the pondered results:
+                # log(f"[Ponder] Depth {current_depth}, Best move: {candidate_move}, Score: {candidate_score}")
+            except Exception as e:
+                # In case of interruption or error, break out.
+                break
+            current_depth += 1
+
+    def _iterative_search_ponder(self, depth):
+        """
+        A variant of iterative search used during pondering.
+        It does not enforce a strict time limit,
+        but checks the `ponder_stop` flag to exit early.
+        """
+        moves = self._generate_legal_moves_for_role()
+        if not moves:
+            return "exit", self._evaluate_terminal()
+        if self.role == "White":
+            best_score = float('-inf')
+        else:
+            best_score = float('inf')
+        best_move = None
+        alpha = float('-inf')
+        beta = float('inf')
+        for move in moves:
+            if self.ponder_stop.is_set():
+                break
+            # Work on a deep copy of the current board.
+            w_copy = copy.deepcopy(self.white_bitmap)
+            b_copy = copy.deepcopy(self.black_bitmap)
+            if self.role == "White":
+                execute_move(move, w_copy, b_copy, simulate=True)
+                score = self._alpha_beta(w_copy, b_copy, depth - 1, alpha, beta, "Black")
+                if score > best_score:
+                    best_score = score
+                    best_move = move
+                alpha = max(alpha, best_score)
+                if beta <= alpha:
+                    break  # Beta cutoff.
+            else:
+                execute_move(move, b_copy, w_copy, simulate=True)
+                score = self._alpha_beta(w_copy, b_copy, depth - 1, alpha, beta, "White")
+                if score < best_score:
+                    best_score = score
+                    best_move = move
+                beta = min(beta, best_score)
+                if beta <= alpha:
+                    break  # Alpha cutoff.
+        return best_move, best_score
 
     def make_move(self, time_limit=10, move_count=0):
         """
@@ -338,11 +414,10 @@ class AIAgent:
 
         # DYNAMIC DEPTH SCHEDULING:
         # For the first 10 moves of the entire game, search up to depth 4;
-        # afterwards, allow deeper search (depth 8 or 9). Adjust as you like.
         if move_count < 10:
-            max_depth = 4
+            max_depth = 5
         else:
-            max_depth = 9
+            max_depth = 11
 
         moves = self._generate_legal_moves_for_role()
         if not moves:
@@ -535,10 +610,13 @@ class AIAgent:
     def _print_turn_summary(self, depth_reached, move_chosen, start_time, time_limit):
         elapsed = time.time() - start_time
         time_left = time_limit - elapsed
+        # Compute the board evaluation score using our dynamic evaluation function.
+        score = evaluate_board_dynamic(self.white_bitmap, self.black_bitmap, self.role)
         print(
             f"[Agent {self.role}] "
             f"Depth reached: {depth_reached}, "
             f"Move chosen: {move_chosen}, "
+            f"Score: {score}, "
             f"Time spent: {elapsed:.2f}s, "
             f"Time left: {max(time_left, 0):.2f}s"
         )
@@ -591,12 +669,11 @@ def main():
         return
     
     s_file = sock.makefile('r')
-    # --- Updated Handshake Sequence ---
-    msg = s_file.readline().strip()        # Expect greeting (e.g. "Connected to the server!")
+    msg = s_file.readline().strip()        # Greeting message.
     log(f"Server says: {msg}")
     send_message(sock, "OK")
     
-    msg = s_file.readline().strip()        # Expect board setup message (starting with "Setup")
+    msg = s_file.readline().strip()        # Board setup message.
     log(f"Server says: {msg}")
     if msg.startswith("Setup"):
         white_bitmap, black_bitmap = initialize_boards(msg)
@@ -606,15 +683,12 @@ def main():
         return
     
     send_message(sock, "OK")
-    
-    msg = s_file.readline().strip()        # Time message
+    msg = s_file.readline().strip()        # Time message.
     log(f"Server says: {msg}")
     send_message(sock, "OK")
-    
-    msg = s_file.readline().strip()        # BEGIN message
+    msg = s_file.readline().strip()        # BEGIN message.
     log(f"Server says: {msg}")
-    
-    msg = s_file.readline().strip()        # Role assignment message
+    msg = s_file.readline().strip()        # Role assignment.
     if msg.startswith("Role"):
         assigned_role = msg.split()[1]
         log(f"Assigned role: {assigned_role}")
@@ -635,8 +709,12 @@ def main():
             if move.lower() == "exit":
                 log("Exiting game.")
                 break
+            move_count += 1
         else:
+            # Start pondering while waiting for the opponent's move.
+            agent.start_pondering()
             opp_move = s_file.readline().strip()
+            agent.stop_pondering()
             if not opp_move or opp_move.lower() in ["exit", "gameover"]:
                 log("Game over. Exiting.")
                 break
@@ -645,15 +723,15 @@ def main():
                 execute_move(opp_move, black_bitmap, white_bitmap)
             else:
                 execute_move(opp_move, white_bitmap, black_bitmap)
-        
-        # --- NEW WIN CHECK: After every move, check if a terminal win has been reached.
-        winner = check_win_conditions(white_bitmap, black_bitmap)
-        if winner:
-            log(f"Game over: {winner}")
-            send_message(sock, f"win: {winner}")
-            break
-        
-        move_count += 1
+            
+            # Check win conditions after the opponent's move.
+            winner = check_win_conditions(white_bitmap, black_bitmap)
+            if winner:
+                log(f"Game over: {winner}")
+                send_message(sock, f"win: {winner}")
+                break
+            
+            move_count += 1
     
     elapsed = time.time() - session_start
     log(f"Session ended. Elapsed time: {int(elapsed)} secs")
