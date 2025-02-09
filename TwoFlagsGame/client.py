@@ -429,16 +429,6 @@ def start_client():
                 if opp_move.lower() == "exit":
                     print("Server has quit the session.")
                     break
-                if opp_move == "NEW GAME":
-                    # New game requested: read the new board setup and reinitialize.
-                    setup_msg = recv_msg(s_file, session_stats)
-                    white_bitmap, black_bitmap = initialize_boards(setup_msg)
-                    print("New game started.")
-                    display_boards(white_bitmap, black_bitmap)
-                    continue
-                if opp_move.startswith("win:"):
-                    print(opp_move)
-                    # Continue – the server may later send a replay command.
                 print("Opponent move received:", opp_move)
                 execute_move(opp_move, opp_bitmap, own_bitmap)
                 print("Updated board after opponent's move:")
@@ -457,12 +447,6 @@ def start_client():
                 if opp_move.lower() == "exit":
                     print("Server has quit the session.")
                     break
-                if opp_move == "NEW GAME":
-                    setup_msg = recv_msg(s_file, session_stats)
-                    white_bitmap, black_bitmap = initialize_boards(setup_msg)
-                    print("New game started.")
-                    display_boards(white_bitmap, black_bitmap)
-                    continue
                 print("Opponent move received:", opp_move)
                 execute_move(opp_move, opp_bitmap, own_bitmap)
                 print("Updated board after opponent's move:")

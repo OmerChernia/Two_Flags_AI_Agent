@@ -383,12 +383,6 @@ def start_agent():
                     print(win_msg)
                     break
                 opp_move = recv_msg(s_file, session_stats)
-                if opp_move == "NEW GAME":
-                    setup_msg = recv_msg(s_file, session_stats)
-                    white_bitmap, black_bitmap = initialize_boards(setup_msg)
-                    print("New game started.")
-                    display_boards(white_bitmap, black_bitmap)
-                    continue
                 if opp_move.lower() == "exit":
                     print("Server has quit the session.")
                     break
@@ -409,12 +403,6 @@ def start_agent():
             print("You are Black. Waiting for White's move.")
             while True:
                 opp_move = recv_msg(s_file, session_stats)
-                if opp_move == "NEW GAME":
-                    setup_msg = recv_msg(s_file, session_stats)
-                    white_bitmap, black_bitmap = initialize_boards(setup_msg)
-                    print("New game started.")
-                    display_boards(white_bitmap, black_bitmap)
-                    continue
                 if opp_move.lower() == "exit":
                     print("Server has quit the session.")
                     break

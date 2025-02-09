@@ -157,8 +157,7 @@ class PawnChessGUI:
         self.canvas = tk.Canvas(self.game_frame, width=500, height=500)
         self.canvas.pack(pady=10)
         # Add Replay Button for spectator mode.
-        self.replay_button = tk.Button(self.game_frame, text="Replay", command=self.request_replay)
-        self.replay_button.pack(pady=5)
+        # self.replay_button = tk.Button(self.game_frame, text="New Game", command=self.request_replay)
         self.game_frame.pack_forget()
         
         # Flag to indicate whether a custom board has been loaded.
@@ -660,17 +659,6 @@ class PawnChessGUI:
         self.my_turn = flag
         if flag:
             self.status_label.config(text="Your turn!")
-
-    def request_replay(self):
-        """
-        Called when the New Game button is clicked.
-        Sends a new game command to the server via the spectator connection.
-        """
-        if hasattr(self, 'spectator_client') and self.spectator_client is not None:
-            self.spectator_client.send_message("NEW GAME")
-            self.status_label.config(text="New game requested. Waiting for new game setup...")
-        else:
-            print("No spectator connection available.")
 
 if __name__ == "__main__":
     root = tk.Tk()

@@ -674,21 +674,7 @@ def main():
         if winner:
             log(f"Game over: {winner}")
             send_message(sock, f"win: {winner}")
-            # Instead of breaking immediately, wait for a NEW GAME command.
-            new_game_cmd = s_file.readline().strip()
-            if new_game_cmd == "NEW GAME":
-                setup_msg = s_file.readline().strip()  # New board setup
-                
-                # Reset the internal board state of the agent.
-                agent.reset_game(setup_msg)
-                # Update the local board variables in case they are used later.
-                white_bitmap, black_bitmap = agent.white_bitmap, agent.black_bitmap
-                # Optionally, reset move counter (or any other per-game state).
-                move_count = 0
-                log("New game started.")
-                continue
-            else:
-                break
+            break
         
         move_count += 1
     

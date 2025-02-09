@@ -152,22 +152,10 @@ def start_server():
                     if spectator_conn:
                         send_msg(spectator_conn, msg, stats)
                         spectator_conn.close()
-                    # Wait for a new game command rather than closing immediately.
-                    new_game_cmd = s_file1.readline().strip()
-                    if new_game_cmd == "NEW GAME":
-                        new_setup = "Setup Wa2 Wb2 Wc2 Wd2 We2 Wf2 Wg2 Wh2 Ba7 Bb7 Bc7 Bd7 Be7 Bf7 Bg7 Bh7"
-                        send_msg(conn1, "NEW GAME", stats)
-                        send_msg(conn1, new_setup, stats)
-                        if spectator_conn:
-                            send_msg(spectator_conn, "NEW GAME", stats)
-                            send_msg(spectator_conn, new_setup, stats)
-                        # (Optionally reinitialize game state here.)
-                        continue
-                    else:
-                        conn1.close()
-                        conn2.close()
-                        print("Game over.")
-                        return
+                    conn1.close()
+                    conn2.close()
+                    print("Game over.")
+                    return
                 else:
                     send_msg(conn2, msg, stats)
                     if spectator_conn:
