@@ -3,18 +3,16 @@ import sys
 import time
 
 def send_msg(conn, msg, stats):
-    # Append a newline so that the receiver can determine the end of the message.
+    # Append newline for message termination.
     full_msg = msg + "\n"
     data = full_msg.encode()
     try:
         conn.sendall(data)
         stats["bytes_written"] += len(data)
     except BrokenPipeError:
-        print("Send error: [Errno 32] Broken pipe. The connection has been closed by the server. "
-              "Please reconnect or restart the client.")
+        print("Send error: Broken pipe.")
 
 def recv_msg(conn_file, stats):
-    # Read a full line (i.e. one message ending with '\n')
     line = conn_file.readline()
     if not line:
         return ""
@@ -41,11 +39,10 @@ def initialize_boards(setup_msg):
     white_bitmap = [[False for _ in range(8)] for _ in range(8)]
     black_bitmap = [[False for _ in range(8)] for _ in range(8)]
     tokens = setup_msg.split()
-    # First token should be "Setup", then tokens like "Wa2" follow.
     for token in tokens[1:]:
         if len(token) < 3:
-            continue  # skip ill-formed token
-        color = token[0]
+            continue 
+        color = token[0].upper()
         pos = token[1:]
         row, col = convert_coord(pos)
         if color == 'W':
@@ -63,11 +60,10 @@ def display_board(bitmap, label):
     print(f"--- {label} Pawn Board ---")
     print("  a b c d e f g h")
     for i in range(8):
-        rank_label = 8 - i
         row_str = ""
         for j in range(8):
             row_str += "1 " if bitmap[i][j] else ". "
-        print(f"{rank_label} {row_str}")
+        print(f"{8 - i} {row_str}")
     print("")
 
 def display_boards(white_bitmap, black_bitmap):
@@ -326,31 +322,34 @@ def check_win_conditions(white_bitmap, black_bitmap):
     return None
 
 def start_client():
-    # Use command-line arguments for host and port if provided.
     if len(sys.argv) >= 3:
         host = sys.argv[1]
         port = int(sys.argv[2])
     else:
         host = '127.0.0.1'
         port = 9999
-
+    custom_setup = None
+    if len(sys.argv) >= 4:
+        custom_setup = sys.argv[3]
+    
     session_stats = {"bytes_read": 0, "bytes_written": 0}
     session_start = time.time()
-
+    
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.connect((host, port))
-        # Wrap the socket with a file-like object to enable readline().
         s_file = s.makefile('r')
         print("Connected to the server!")
-
-        # -- Handshake sequence --
-        # Step 2: Receive "Connected to the server!" message.
+        
+        # --- Handshake Sequence ---
         msg = recv_msg(s_file, session_stats)
         print(f"Server says: {msg}")
-        # Step 3: Send "OK".
-        send_msg(s, "OK", session_stats)
-
-        # Step 4: Receive board setup message.
+        if custom_setup and custom_setup.startswith("Setup "):
+            send_msg(s, custom_setup, session_stats)
+            ack = recv_msg(s_file, session_stats)
+            print("Server setup acknowledgment:", ack)
+        else:
+            send_msg(s, "OK", session_stats)
+        
         msg = recv_msg(s_file, session_stats)
         print(f"Server says: {msg}")
         if msg.startswith("Setup"):
@@ -360,30 +359,23 @@ def start_client():
         else:
             print("Unexpected board setup message. Exiting.")
             return
-        # Step 5: Send "OK".
+        
+        # Continue handshake (time, BEGIN, role assignment, etc.)
         send_msg(s, "OK", session_stats)
-
-        # Step 6: Receive time message.
         msg = recv_msg(s_file, session_stats)
         print(f"Server says: {msg}")
-        # Step 7: Send "OK".
         send_msg(s, "OK", session_stats)
-
-        # Step 9: Receive "Begin" message.
         msg = recv_msg(s_file, session_stats)
         print(f"Server says: {msg}")
-
-        # Receive role assignment (e.g., "Role White" or "Role Black").
         role_msg = recv_msg(s_file, session_stats)
         print(f"Server says: {role_msg}")
-        role = ""
         if role_msg.startswith("Role"):
             role = role_msg.split()[1]
             print(f"Assigned role: {role}")
         else:
             print("Did not receive role assignment. Exiting.")
             return
-
+        
         # Set pointers for updating:
         # For White: own_bitmap = white_bitmap, opp_bitmap = black_bitmap.
         # For Black: own_bitmap = black_bitmap, opp_bitmap = white_bitmap.

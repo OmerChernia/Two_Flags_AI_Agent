@@ -54,7 +54,7 @@ def initialize_boards(setup_msg):
     for token in tokens[1:]:
         if len(token) < 3:
             continue  # skip ill-formed token
-        color = token[0]
+        color = token[0].upper()
         pos = token[1:]
         row, col = convert_coord(pos)
         if color == 'W':
@@ -292,31 +292,36 @@ def check_win_conditions(white_bitmap, black_bitmap):
     return None
 
 def start_agent():
-    # Use command-line arguments for host and port if provided.
+    # Use command-line arguments for host, port, and optionally a custom board.
     if len(sys.argv) >= 3:
         host = sys.argv[1]
         port = int(sys.argv[2])
     else:
         host = '127.0.0.1'
         port = 9999
-
+    
+    custom_setup = None
+    if len(sys.argv) >= 4:
+        custom_setup = sys.argv[3]
+    
     session_stats = {"bytes_read": 0, "bytes_written": 0}
     session_start = time.time()
-
+    
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.connect((host, port))
-        # Wrap the socket with a file-like object to enable readline().
         s_file = s.makefile('r')
         print("Connected to the server!")
         
-        # -- Handshake sequence --
-        # Step 2: Receive "Connected to the server!" message.
+        # --- Handshake Sequence ---
         msg = recv_msg(s_file, session_stats)
         print(f"Server says: {msg}")
-        # Step 3: Send "OK".
-        send_msg(s, "OK", session_stats)
+        if custom_setup and custom_setup.startswith("Setup "):
+            send_msg(s, custom_setup, session_stats)
+            ack = recv_msg(s_file, session_stats)
+            print("Server setup acknowledgment:", ack)
+        else:
+            send_msg(s, "OK", session_stats)
         
-        # Step 4: Receive board setup message.
         msg = recv_msg(s_file, session_stats)
         print(f"Server says: {msg}")
         if msg.startswith("Setup"):
@@ -326,22 +331,15 @@ def start_agent():
         else:
             print("Unexpected board setup message. Exiting.")
             return
-        # Step 5: Send "OK".
+        
+        # Continue handshake...
         send_msg(s, "OK", session_stats)
-        
-        # Step 6: Receive time message.
-        msg = recv_msg(s_file, session_stats)
-        print(f"Server says: {msg}")
-        # Step 7: Send "OK".
+        time_msg = recv_msg(s_file, session_stats)
+        print(f"Server says: {time_msg}")
         send_msg(s, "OK", session_stats)
-        
-        # Step 9: Receive "Begin" message.
-        msg = recv_msg(s_file, session_stats)
-        print(f"Server says: {msg}")
-        
-        # Receive role assignment (e.g., "Role White" or "Role Black").
+        begin_msg = recv_msg(s_file, session_stats)
+        print(f"Server says: {begin_msg}")
         role_msg = recv_msg(s_file, session_stats)
-        print(f"Server says: {role_msg}")
         if role_msg.startswith("Role"):
             role = role_msg.split()[1]
             print(f"Assigned role: {role}")

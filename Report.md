@@ -90,11 +90,58 @@
 
 8. **Demonstrate its evaluation for several key game states you used to test it.**
 
-   Example 1: A board where White has a pawn on row 0 results in an evaluation of -10000 (immediate win for White).
+   ![image](Report_files/weights.png)
+   Here is a brief explanation of each parameter in the evaluation settings:
 
-   Example 2: A board where a Black pawn sits on row 6 (one move from promotion) would add a significant bonus (e.g., promotion_bonus of 1000) plus advancement points, resulting in a high positive score.
+   - win_score (10000)
+     A very large “prize” score awarded if an engine detects a winning condition (for instance, capturing the enemy flag or otherwise “checkmating” in a variant). It ensures that winning moves rank above all else.
+   - material (40)
+     The base value (or weight) used for each pawn’s material. For example, having one more pawn than the opponent might yield +40 in the evaluation.
+   - promotion_bonus (1000)
+     Extra score allotted if a pawn is on the verge of promoting (or has potential to promote soon). Encourages the AI to push pawns to promotion squares.
+   - advancement (30)
+     A bonus added for each rank (or certain ranks) that a pawn has advanced up the board. Usually used for Black pawns (if “white_advancement” is separate).
+   - passed_pawn (250)
+     A large bonus for a passed pawn (no opposing pawns can block or capture it on its path). Passed pawns are extremely valuable because they have a high potential to promote or force the opponent’s resources into defense.
+   - white_advancement (30)
+     Same concept as “advancement,” but applied specifically to White pawns. Splitting them out (rather than using a single “advancement” constant) allows adjusting White vs. Black pawn bonuses independently.
+   - white_passed_pawn (150)
+     Bonus for White’s passed pawns. Again, it’s separated so you can differentiate how much White is rewarded for a passed pawn vs. Black.
 
-   Example 3: In a balanced board but with Black having one extra pawn than White, the contribution from the "material" weight would tilt the score positively by approximately 10 points (adjusted further by the advancements collected).
+     ***
+
+   - Example 1:
+     A board where White has a pawn on row 0 results in an evaluation of -10000 (immediate win for White).
+
+     ![image](Report_files/example1_board.png)
+     ![image](Report_files/example1_output.png)
+
+     ***
+
+   - Example 2:
+     A board where a Black pawn sits on row 2 (one move from promotion) would add a significant bonus (e.g., promotion_bonus of 1000) plus advancement points, resulting in a high positive score.
+
+     ![image](Report_files/example2_board.png)
+     ![image](Report_files/example2_output.png)
+
+     lets analyze the score:
+     one step away from promotion: score was -180 (notice that the white pawns are close to promotion but not there yet)
+     the black pawn is one step away from promotion, so it gets a bonus of 1000
+     the black pawn has advanced one square, so it gets 1000 points.
+     the total score is determined by the white pawns to, but we can see that he got almost 1000 points advantage.
+
+     ***
+
+   - Example 3:
+     In a balanced board but with Black having one extra pawn than White, the contribution from the "material" weight would tilt the score positively by approximately 10 points (adjusted further by the advancements collected).
+
+     ![image](Report_files/example3_board.png)
+     ![image](Report_files/example3_board_2.png)
+     ![image](Report_files/example3_output.png)
+
+     lets analyze the score:
+     the board is almost balanced, so the score is 40 (one more pawn than the opponent).
+     after few moves the black pawn and white pawn moved few squares forward, so the score is now 70.
 
    Such tests helped confirm that the function assigns higher values to positions with a clear win potential and that the weighting effectively reflects board advantages.
 

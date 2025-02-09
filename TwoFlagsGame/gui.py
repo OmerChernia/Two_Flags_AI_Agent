@@ -3,22 +3,11 @@ from tkinter import ttk, messagebox
 import socket
 import threading
 import time
-from client import generate_all_legal_moves
+from client import generate_all_legal_moves, initialize_boards, send_msg, recv_msg
 
 # ----------------------
 # Helper Functions
 # ----------------------
-def recv_msg(conn_file, stats):
-    try:
-        line = conn_file.readline()
-        if not line:
-            return ""
-        stats["bytes_read"] += len(line)
-        return line.strip()
-    except Exception as e:
-        print("Receive error:", e)
-        return ""
-
 def coord_to_algebraic(row, col):
     return chr(ord('a') + col) + str(8 - row)
 
@@ -48,12 +37,6 @@ def initialize_boards(setup_msg):
         elif color.upper() == 'B':
             black_bitmap[row][col] = True
     return white_bitmap, black_bitmap
-
-def send_msg(conn, msg, stats):
-    full_msg = msg + "\n"
-    data = full_msg.encode()
-    conn.sendall(data)
-    stats["bytes_written"] += len(data)
 
 # ----------------------
 # Spectator / Human Client Thread (for spectator mode we already used SpectatorClient)
@@ -162,6 +145,7 @@ class PawnChessGUI:
         
         # Flag to indicate whether a custom board has been loaded.
         self.use_custom_board = False
+        self.custom_setup_string = None
         
         # Initialize board state with default setup.
         self.default_setup = "Setup Wa2 Wb2 Wc2 Wd2 We2 Wf2 Wg2 Wh2 Ba7 Bb7 Bc7 Bd7 Be7 Bf7 Bg7 Bh7"
@@ -200,64 +184,66 @@ class PawnChessGUI:
             self.connect_as_human(host, game_port)
 
     def connect_as_human(self, host, game_port):
+        self.human_mode = True
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
-            self.human_mode = True
-            self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.sock.connect((host, game_port))
-            self.conn_file = self.sock.makefile("r")
-            
-            # --- Custom setup sequence (if any) ---
-            if self.use_custom_board:
-                send_msg(self.sock, self.custom_setup_string, self.session_stats)
-                ack = recv_msg(self.conn_file, self.session_stats)
-                if ack != "SETUP-ACK":
-                    print("Custom setup acknowledgment not received, got:", ack)
-                else:
-                    print("Custom board setup sent and acknowledged by server.")
-
-            # --- Handshake Sequence ---
-            welcome = recv_msg(self.conn_file, self.session_stats)
-            print("Server says:", welcome)
-            send_msg(self.sock, "OK", self.session_stats)
-            
-            setup_msg = recv_msg(self.conn_file, self.session_stats)
-            print("Server says:", setup_msg)
-            self.white_bitmap, self.black_bitmap = initialize_boards(setup_msg)
-            self.draw_board()
-            send_msg(self.sock, "OK", self.session_stats)
-            
-            time_msg = recv_msg(self.conn_file, self.session_stats)
-            print("Server says:", time_msg)
-            send_msg(self.sock, "OK", self.session_stats)
-            
-            begin_msg = recv_msg(self.conn_file, self.session_stats)
-            print("Server says:", begin_msg)
-            
-            role_msg = recv_msg(self.conn_file, self.session_stats)
-            print("Server says:", role_msg)
-            if role_msg.startswith("Role"):
-                self.role = role_msg.split()[1]
-                print("Assigned role:", self.role)
-            else:
-                messagebox.showerror("Error", "Role not assigned. Exiting.")
-                return
-
-            # Switch the display to game mode.
-            self.config_frame.pack_forget()
-            self.game_frame.pack(fill="both", expand=True)
-
-            # If white, it's your turn right away. Otherwise, wait.
-            if self.role == "White":
-                self.my_turn = True
-                self.status_label.config(text="Connected as HUMAN (White). Your turn!")
-            else:
-                self.my_turn = False
-                self.status_label.config(text="Connected as HUMAN (Black). Waiting for opponent's move...")
-
-            self.canvas.bind("<Button-1>", self.on_canvas_click)
-            threading.Thread(target=self.human_listen_thread, daemon=True).start()
+            self.conn_file = self.sock.makefile('r')
+            self.status_label.config(text="Connected to server.")
         except Exception as e:
-            messagebox.showerror("Connection Error", f"Could not connect as human: {e}")
+            self.status_label.config(text=f"Connection error: {e}")
+            return
+        
+        # --- Handshake Sequence ---
+        greeting = recv_msg(self.conn_file, self.session_stats)
+        print("Server says:", greeting)
+        
+        # Send the custom board if one was loaded; otherwise send "OK".
+        if self.use_custom_board and self.custom_setup_string:
+            send_msg(self.sock, self.custom_setup_string, self.session_stats)
+            ack = recv_msg(self.conn_file, self.session_stats)
+            print("Server setup acknowledgment:", ack)
+        else:
+            send_msg(self.sock, "OK", self.session_stats)
+        
+        # Now receive the board setup from the server.
+        setup_msg = recv_msg(self.conn_file, self.session_stats)
+        print("Server says:", setup_msg)
+        if setup_msg.startswith("Setup"):
+            self.white_bitmap, self.black_bitmap = initialize_boards(setup_msg)
+            self.status_label.config(text="Board setup received and parsed.")
+            self.draw_board()
+        else:
+            self.status_label.config(text="Unexpected board setup message. Exiting.")
+            return
+        
+        # Continue with the remaining handshake.
+        send_msg(self.sock, "OK", self.session_stats)
+        time_msg = recv_msg(self.conn_file, self.session_stats)
+        print("Server says:", time_msg)
+        send_msg(self.sock, "OK", self.session_stats)
+        begin_msg = recv_msg(self.conn_file, self.session_stats)
+        print("Server says:", begin_msg)
+        role_msg = recv_msg(self.conn_file, self.session_stats)
+        if role_msg.startswith("Role"):
+            self.role = role_msg.split()[1]
+            print("Assigned role:", self.role)
+        else:
+            print("No role assignment from server; using default role.")
+        
+        # Switch GUI panels to game mode.
+        self.config_frame.pack_forget()
+        self.game_frame.pack(fill="both", expand=True)
+        
+        if self.role == "White":
+            self.my_turn = True
+            self.status_label.config(text="Connected as HUMAN (White). Your turn!")
+        else:
+            self.my_turn = False
+            self.status_label.config(text="Connected as HUMAN (Black). Waiting for opponent's move...")
+        
+        self.canvas.bind("<Button-1>", self.on_canvas_click)
+        threading.Thread(target=self.human_listen_thread, daemon=True).start()
 
     def human_listen_thread(self):
         # Continuously listen for messages from the server.
@@ -625,7 +611,9 @@ class PawnChessGUI:
             self.draw_setup_board()
 
     def finish_board_setup(self):
-        """Generate the Setup string from the board state and return to the configuration panel."""
+        """
+        Generate the Setup string from the current board state and return to the configuration panel.
+        """
         tokens = []
         for row in range(8):
             for col in range(8):
@@ -635,25 +623,25 @@ class PawnChessGUI:
                 elif self.black_bitmap[row][col]:
                     tokens.append("B" + pos)
         self.custom_setup_string = "Setup " + " ".join(tokens)
+        # Ensure the flag is set so the custom setup is sent on connection.
+        self.use_custom_board = True
         self.status_label.config(text=f"Custom Setup: {self.custom_setup_string}")
-        # Destroy the setup frame (and its canvas) then show the config panel.
         self.setup_frame.destroy()
         self.config_frame.pack(pady=20)
 
     def load_custom_board(self):
         """
         Called when the user clicks the "Load Custom Board" button.
-        It verifies that a custom setup was configured and sets a flag,
-        so that later when connecting the custom board is sent to the server.
+        It verifies that a custom setup has been defined and sets a flag,
+        so that when connecting the custom board string is sent to the server.
         """
         if self.custom_setup_string:
             self.use_custom_board = True
             messagebox.showinfo("Custom Setup Loaded",
                                 f"Custom board loaded:\n{self.custom_setup_string}")
-            print("Custom board loaded and will be sent during connection.")
+            print("Custom board loaded and will be sent during connection. The Setup: " + self.custom_setup_string)
         else:
-            messagebox.showerror("Error",
-                                 "No custom board setup defined. Please edit the board setup first.")
+            messagebox.showerror("Error", "No custom board setup defined. Please edit the board setup first.")
 
     def set_my_turn(self, my_turn):
         self.my_turn = my_turn

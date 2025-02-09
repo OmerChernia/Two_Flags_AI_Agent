@@ -10,17 +10,15 @@ default_setup = "Setup Wa2 Wb2 Wc2 Wd2 We2 Wf2 Wg2 Wh2 Ba7 Bb7 Bc7 Bd7 Be7 Bf7 B
 board_setup = default_setup
 starting_side = "White"  # Define a default starting side
 
-def update_setup(new_setup, new_starting_side):
+def update_setup(new_setup, side):
     """
     Update the global board setup and starting side.
     Called from the GUI if a custom board setup is used.
     """
-    global board_setup, starting_side
+    global board_setup, starting_side  # Important for updating module-level variables
     board_setup = new_setup
-    starting_side = new_starting_side
-    print("Server board setup updated:")
-    print("Board Setup:", board_setup)
-    print("Starting Side:", starting_side)
+    starting_side = side
+    print("Board setup updated to:", board_setup)
 
 def send_msg(conn, msg, stats):
     full_msg = msg + "\n"
@@ -81,44 +79,52 @@ def start_server():
 
     print("Waiting for game connection 1...")
     conn1, addr1 = game_sock.accept()
-    print("Game connection 1 from", addr1)
+    print(f"Connection 1 from {addr1}")
     s_file1 = conn1.makefile("r")
     
-    # Check if a custom board setup is being sent from connection 1.
-    import select
-    ready, _, _ = select.select([conn1], [], [], 0.5)
-    if ready:
-        first_msg = recv_msg(s_file1, stats)
-    else:
-        first_msg = ""
+    # 1) Send the greeting
+    send_msg(conn1, "Connected to the server!", stats)
+
+    # 2) Now read the client's first message (which may be "Setup ..." or "OK")
+    first_msg = recv_msg(s_file1, stats)
     if first_msg.startswith("Setup "):
         update_setup(first_msg, "White")
         send_msg(conn1, "SETUP-ACK", stats)
         print("Custom board setup received from connection 1.")
-    # If no custom setup is provided, do nothing.
+    elif first_msg == "OK":
+        print("Connection 1 acknowledged handshake without a custom setup.")
+    else:
+        print("Unexpected handshake message from connection 1:", first_msg)
 
     print("Waiting for game connection 2...")
     conn2, addr2 = game_sock.accept()
     print("Game connection 2 from", addr2)
     s_file2 = conn2.makefile("r")
 
-    # --- Common Handshake for Both Players ---
-    send_msg(conn1, "Connected to the server!", stats)
     send_msg(conn2, "Connected to the server!", stats)
-    recv_msg(s_file1, stats)  # Expecting "OK" from conn1.
-    recv_msg(s_file2, stats)  # Expecting "OK" from conn2.
+    # For the second connection:
+    handshake_msg = recv_msg(s_file2, stats)
+    if handshake_msg.startswith("Setup "):
+        update_setup(handshake_msg, "Black")  # or whichever side you intend
+        send_msg(conn2, "SETUP-ACK", stats)
+        print("Custom board setup received from connection 2.")
+    elif handshake_msg == "OK":
+        print("Connection 2 acknowledged handshake without a custom setup.")
+    else:
+        print("Unexpected handshake message from connection 2:", handshake_msg)
 
+    # --- Common Handshake for Both Players ---
+    # (Board setup has already been updated if a custom message was sent.)
     send_msg(conn1, board_setup, stats)
     send_msg(conn2, board_setup, stats)
-    # (Spectator already received board_setup upon connection.)
-    recv_msg(s_file1, stats)  # Expecting "OK" after board setup.
+    recv_msg(s_file1, stats)  # Expecting "OK" after receiving board setup.
     recv_msg(s_file2, stats)
-
+    
     send_msg(conn1, str(time_value), stats)
     send_msg(conn2, str(time_value), stats)
-    recv_msg(s_file1, stats)  # Expecting "OK" after time message.
+    recv_msg(s_file1, stats)
     recv_msg(s_file2, stats)
-
+    
     send_msg(conn1, "BEGIN", stats)
     send_msg(conn2, "BEGIN", stats)
     if starting_side == "White":
@@ -176,6 +182,50 @@ def start_server():
                     send_msg(conn1, msg, stats)
                     if spectator_conn:
                         send_msg(spectator_conn, msg, stats)
+
+def handle_client(conn, addr):
+    global board_setup, starting_side  # Ensure we refer to the global variables.
+    stats = {"bytes_read": 0, "bytes_written": 0}
+    conn_file = conn.makefile('r')
+    print(f"Game connection from {addr}")
+    
+    # --- Initial Handshake ---
+    # Send greeting message.
+    send_msg(conn, "Connected to the server!", stats)
+    
+    # Read the first message from the client.
+    handshake = recv_msg(conn_file, stats)
+    if handshake.startswith("Setup "):
+        print("Received custom board setup from client: " + handshake)
+        # Use the update function so that the custom board is locked in.
+        update_setup(handshake, starting_side)
+        send_msg(conn, "SETUP-ACK", stats)
+    else:
+        send_msg(conn, "OK", stats)
+    
+    # Now send the (possibly updated) board setup to the client.
+    print("Sending board setup: " + board_setup)
+    send_msg(conn, board_setup, stats)
+    
+    # Continue with the remaining handshake (time control, BEGIN, role assignment, etc.)
+    send_msg(conn, "30", stats)      # For example, time control in seconds.
+    send_msg(conn, "BEGIN", stats)   
+    # --- End handshake, now enter game loop, etc. ---
+    try:
+        while True:
+            msg = recv_msg(conn_file, stats)
+            if not msg:
+                break
+            if msg.startswith("Setup "):
+                print("Ignoring board setup message during game: " + msg)
+                continue
+            print("Processing move: " + msg)
+            send_msg(conn, "OK", stats)
+    except Exception as e:
+        print("Error in game loop: " + str(e))
+    finally:
+        conn.close()
+        print("Connection closed.")
 
 if __name__ == "__main__":
     # Start the server (game and spectator handling) in a separate daemon thread.

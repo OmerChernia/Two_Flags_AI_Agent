@@ -184,11 +184,11 @@ def is_passed_pawn(own_bitmap, opp_bitmap, row, col, side):
                     return False
         return True
 
-# --- GLOBAL WEIGHTS & TD UPDATE ---
-# These global weights are used by our evaluation function and can be updated via TD learning.
+# --- GLOBAL WEIGHTS ---
+# These global weights are used by our evaluation function
 weights = {
     "win_score": 10000,
-    "material": 10,
+    "material": 40,
     "promotion_bonus": 1000,
     "advancement": 30,
     "passed_pawn": 250,
@@ -313,6 +313,19 @@ def minimax(white, black, depth, maximizing, role, start_time, time_limit, alpha
                 break  # Alpha cutoff.
         return min_eval
 
+def display_board(bitmap, label):
+    print(f"--- {label} Pawn Board ---")
+    print("  a b c d e f g h")
+    for i in range(8):
+        row_str = ""
+        for j in range(8):
+            row_str += "1 " if bitmap[i][j] else ". "
+        print(f"{8 - i} {row_str}")
+    print("")
+
+def display_boards(white_bitmap, black_bitmap):
+    display_board(white_bitmap, "White")
+    display_board(black_bitmap, "Black")
 
 class AIAgent:
     def __init__(self, role, white_bitmap, black_bitmap):
@@ -646,10 +659,19 @@ class AIAgent:
 
         print("Learning routine is not implemented yet.")
 
+    def print_evaluation(self):
+        """
+        Prints the current evaluation value of the board.
+        The evaluation is computed from the agent's perspective.
+        """
+        score = evaluate_board_dynamic(self.white_bitmap, self.black_bitmap, self.role)
+        print(score)
+
 def main():
     host = "127.0.0.1"
     port = 9999
     role = "White"
+    custom_setup = None
     if len(sys.argv) >= 2:
         host = sys.argv[1]
     if len(sys.argv) >= 3:
@@ -659,7 +681,10 @@ def main():
             log("Invalid port; using default 9999.")
     if len(sys.argv) >= 4:
         role = sys.argv[3]
-    
+    if len(sys.argv) >= 5:
+        # e.g., "Setup Wb8 Bd5 Be5"
+        custom_setup = sys.argv[4]
+
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
         sock.connect((host, port))
@@ -669,35 +694,49 @@ def main():
         return
     
     s_file = sock.makefile('r')
-    msg = s_file.readline().strip()        # Greeting message.
-    log(f"Server says: {msg}")
-    send_message(sock, "OK")
     
-    msg = s_file.readline().strip()        # Board setup message.
+    # --- Handshake Start ---
+    msg = s_file.readline().strip()  # Greeting.
+    log(f"Server says: {msg}")
+    if custom_setup and custom_setup.startswith("Setup "):
+        send_message(sock, custom_setup)
+        ack = s_file.readline().strip()  # Expecting "SETUP-ACK"
+        log(f"Server setup acknowledgment: {ack}")
+    else:
+        send_message(sock, "OK")
+    
+    # Now receive the board setup.
+    msg = s_file.readline().strip()  # Board setup message.
     log(f"Server says: {msg}")
     if msg.startswith("Setup"):
         white_bitmap, black_bitmap = initialize_boards(msg)
-        log("Board setup received and parsed.")
+        log("Board setup received and parsed:")
+        display_boards(white_bitmap, black_bitmap)
     else:
         log("Unexpected board setup message. Exiting.")
         return
     
+    # Continue with handshake.
     send_message(sock, "OK")
-    msg = s_file.readline().strip()        # Time message.
+    msg = s_file.readline().strip()  # Time message.
     log(f"Server says: {msg}")
     send_message(sock, "OK")
-    msg = s_file.readline().strip()        # BEGIN message.
+    msg = s_file.readline().strip()  # BEGIN message.
     log(f"Server says: {msg}")
-    msg = s_file.readline().strip()        # Role assignment.
+    msg = s_file.readline().strip()  # Role assignment.
     if msg.startswith("Role"):
         assigned_role = msg.split()[1]
         log(f"Assigned role: {assigned_role}")
         role = assigned_role
     else:
         log("No role assignment from server; using default role.")
+    # --- Handshake End ---
     
     agent = AIAgent(role, white_bitmap, black_bitmap)
     
+    # Print the current evaluation of the board:
+    agent.print_evaluation()
+
     move_count = 0
     session_start = time.time()
     
