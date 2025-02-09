@@ -91,6 +91,7 @@
 8. **Demonstrate its evaluation for several key game states you used to test it.**
 
    ![image](Report_files/weights.png)
+
    Here is a brief explanation of each parameter in the evaluation settings:
 
    - win_score (10000)
