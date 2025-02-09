@@ -4,8 +4,8 @@
 
    The board is represented using two 8×8 Boolean bitmaps (2D lists) see "initialize_boards" function in agent.py. One bitmap holds the positions of the white pawns and the other for the black pawns. Each cell is either True (indicating the presence of a pawn) or False (empty).
 
-   ![image](Report_Files/bit_board.png)
-   ![image](Report_Files/bit_board_gui.png)
+   ![image](Report_files/bit_board.png)
+   ![image](Report_files/bit_board_gui.png)
 
 2. **What data structures does the agent rely on?**
 
