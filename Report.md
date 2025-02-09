@@ -2,7 +2,10 @@
 
 1. **What representation did you choose for the game board?**
 
-   The board is represented using two 8×8 Boolean bitmaps (2D lists). One bitmap holds the positions of the white pawns and the other for the black pawns. Each cell is either True (indicating the presence of a pawn) or False (empty).
+   The board is represented using two 8×8 Boolean bitmaps (2D lists) see "initialize_boards" function in agent.py. One bitmap holds the positions of the white pawns and the other for the black pawns. Each cell is either True (indicating the presence of a pawn) or False (empty).
+
+   ![image](Report_Files/bit_board.png)
+   ![image](Report_Files/bit_board_gui.png)
 
 2. **What data structures does the agent rely on?**
 
@@ -137,7 +140,7 @@
 
    Thanks to alpha–beta pruning and iterative deepening, the effective branching factor is significantly reduced—often estimated to be around half of the theoretical factor, allowing deeper searches in practice.
 
-7. - \*Did you use forward or backward pruning?\*\*
+7. **Did you use forward or backward pruning?**
 
    The algorithm uses forward pruning via alpha–beta pruning.
    Effect: This pruning greatly reduces the number of states that must be evaluated, thus speeding up the search and allowing the agent to explore deeper within the allotted time.
