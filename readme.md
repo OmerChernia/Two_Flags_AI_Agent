@@ -105,6 +105,34 @@ This makes it suitable for experimenting with basic search algorithms, heuristic
 
    ![image](Gui_StartGame.png)
 
+### 3.Watching Two AI Agents Face Each Other
+
+To observe a match between two AI agents without controlling any side yourself:
+
+1. **Start the server** as usual: Serer.exe **Or**
+
+   ```bash
+   python server.py
+
+   ```
+
+2. **Click on "Spectator" in the GUI** you will see the following window:
+
+   ![image](Spec_win.png)
+
+3. **Connect the first AI agent** using: Agent.exe **Or**
+   ```bash
+   python agent.py
+   ```
+4. **Connect the second AI agent** from another terminal: Agent.exe **Or**
+   ```bash
+   python agent.py
+   ```
+
+Now, you can watch the moves in real-time as each agent sends them to the server.
+
+Once both agents are connected, the server will assign them roles (White, Black), and they will play automatically. You can sit back and watch the entire game unfold.
+
 ## Interpreting the Agent's Output
 
 When **`agent.py`** is running, it prints logs similar to:
