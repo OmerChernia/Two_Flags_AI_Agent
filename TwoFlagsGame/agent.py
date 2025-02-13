@@ -203,7 +203,7 @@ def is_passed_pawn(own_bitmap, opp_bitmap, row, col, side):
 # These global weights are used by our evaluation function
 weights = {
     "win_score": 10000,
-    "material": 40,
+    "material": 10,
     "promotion_bonus": 1000,
     "advancement": 30,
     "passed_pawn": 250,
@@ -247,40 +247,6 @@ def evaluate_board_dynamic(white_bitmap, black_bitmap, role):
                         score -= weights["white_passed_pawn"] + (weights["white_advancement"] * advancement)
     return score if role == "Black" else -score
 
-def td_update(state, next_state, reward, alpha=0.01, gamma=0.99):
-    """
-    A simple Temporal Difference (TD) update function.
-    'state' and 'next_state' are tuples: (white_bitmap, black_bitmap, role)
-    This updates the global 'weights' based on the TD error.
-    (This is a very simplified example—more elaborate feature extraction and gradient computation can be used.)
-    """
-    global weights
-    white, black, role = state
-    # Example feature: material difference.
-    white_count = sum(cell for row in white for cell in row)
-    black_count = sum(cell for row in black for cell in row)
-    material_diff = black_count - white_count
-
-    # Example features for pawn advancement.
-    black_advancement = sum(row for row in range(8) for col in range(8) if black[row][col])
-    white_advancement = sum((7 - row) for row in range(8) for col in range(8) if white[row][col])
-    
-    # Construct a simple feature vector.
-    f_state = {
-        "material": material_diff,
-        "advancement": black_advancement,
-        "white_advancement": white_advancement,
-    }
-    
-    V_state = evaluate_board_dynamic(white, black, role)
-    new_white, new_black, role_next = next_state
-    V_next = evaluate_board_dynamic(new_white, new_black, role_next)
-    
-    delta = reward + gamma * V_next - V_state
-    # Update each weight proportionally to its feature value.
-    for key in f_state:
-        if key in weights:
-            weights[key] += alpha * delta * f_state[key]
 
 # --- MINIMAX WITH ITERATIVE DEEPENING SUPPORT ---
 def minimax(white, black, depth, maximizing, role, start_time, time_limit, alpha=-float('inf'), beta=float('inf')):

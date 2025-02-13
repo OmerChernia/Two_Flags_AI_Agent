@@ -206,23 +206,7 @@
 
 1. **Did you use learning or optimization algorithms to improve your agent?**
 
-   Yes.
-   Processes:
-   A Temporal Difference (TD) learning update function (td_update) is provided to adjust the weights in the evaluation function.
-   There is also a placeholder train method in the agent class for future or experimental learning routines.
-   Stopping Criteria:
-   In practice, the learning process could be stopped when the changes (or gradients) fall below a set threshold or after a predefined number of episodes.
-   Currently the learning routine is not fully implemented, so it serves as a scaffold for further optimization work.
-
-2. **What method did you use to evaluate the algorithm’s performance during development?**
-
-   Evaluation Methods:
-   The agent’s performance was monitored by running simulated games against known configurations and other versions of the agent.
-   The evaluation function outputs were compared against manually verified test cases (especially regarding win conditions, pawn promotion scenarios, and material imbalances).
-   Empirical performance metrics (such as win-loss ratios, search depth reached, and time cost per move) were used to judge improvements.
-   Version Comparison:
-   Different versions with variations in evaluation weights and search parameters were tested.
-   Decisions on which version was better were based on a combination of deeper search results, improved evaluation accuracy, and overall better performance (e.g., higher win ratios or faster move generation).
+   No, we did not use learning or optimization algorithms to improve our agent.
 
 ---
 
@@ -286,3 +270,38 @@
    ![image](Report_files/Game_Example1_Log.png)
 
    the agent log is as follows.
+
+2. **Example 2**
+
+   The board setup is as follows:
+
+   ![image](Report_files/1.png)
+
+   Black player is the agent.
+   White player is the human.
+
+   White starts the game.
+
+   ![image](Report_files/2.png)
+
+   ![image](Report_files/3.png)
+
+   ![image](Report_files/4.png)
+
+   ![image](Report_files/5.png)
+
+   ![image](Report_files/6.png)
+
+   ![image](Report_files/7.png)
+
+   ![image](Report_files/8.png)
+
+   ![image](Report_files/9.png)
+
+   ![image](Report_files/10.png)
+
+   ![image](Report_files/11.png)
+
+   ![image](Report_files/12.png)
+
+   ![image](Report_files/13.png)
