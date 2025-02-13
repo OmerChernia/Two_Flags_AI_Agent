@@ -22,7 +22,7 @@ Below is a quick guide to set up the server, connect the agent, and interpret th
    2. [Playing from the Beginning Against the Agent](#playing-from-the-beginning-against-the-agent)
    3. [Optional GUI Usage](#optional-gui-usage)
 4. [Interpreting the Agent's Output](#interpreting-the-agents-output)
-5. [Frequently Asked Questions](#frequently-asked-questions)
+5. [Editing or Customizing the Board Setup](#editing-or-customizing-the-board-setup)
 
 ---
 
