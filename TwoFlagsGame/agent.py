@@ -159,28 +159,43 @@ def simulate_move(move, white_bitmap, black_bitmap, role):
     if role == "White":
         execute_move(move, new_white, new_black)
     else:
-        # For Black, apply the move with boards swapped.
         execute_move(move, new_black, new_white)
     return new_white, new_black
 
-# --- NEW HELPER: Passed Pawn Check ---
+# -----------------------------------------
+# 1) GLOBAL WEIGHTS: Increase promotion etc.
+# -----------------------------------------
+weights = {
+    "win_score": 10000,        # Winning the game
+    "material": 20,            # Material is still important
+    "promotion_bonus": 3500,   # Big bonus for near-promoting pawns (row=6 for Black, row=1 for White)
+    "advancement": 250,         # Gains for pushing pawns forward
+    "passed_pawn": 500,        # Large bonus for having a passed pawn
+    "white_advancement": 30,   # Penalty for White advanced pawns (from Black's perspective)
+    "white_passed_pawn": 150   # Large penalty for letting White have a passed pawn
+}
+
+# -----------------------------------------
+# 2) HELPER: Check if Pawn is Passed
+#    (No opposing pawns directly ahead)
+# -----------------------------------------
 def is_passed_pawn(own_bitmap, opp_bitmap, row, col, side):
     """
-    For a pawn at (row, col) of the given side, check if there is any opposing pawn
-    in front (in adjacent files including the same file).
-    For Black, 'in front' means in rows row+1 to 7.
-    For White, it is rows 0 to row-1.
+    Returns True if a pawn at (row, col) has no opposing pawns blocking
+    or diagonally ahead on the relevant ranks.
     """
     if side == "Black":
         for r in range(row+1, 8):
-            for c in [col-1, col, col+1]:
-                if 0 <= c < 8 and opp_bitmap[r][c]:
+            # Check same file, plus diagonals
+            for cc in [col-1, col, col+1]:
+                if 0 <= cc < 8 and opp_bitmap[r][cc]:
                     return False
         return True
-    else:  # For White
-        for r in range(0, row):
-            for c in [col-1, col, col+1]:
-                if 0 <= c < 8 and opp_bitmap[r][c]:
+    else:  # side == "White"
+        for r in range(row-1, -1, -1):
+            # Check same file, plus diagonals
+            for cc in [col-1, col, col+1]:
+                if 0 <= cc < 8 and opp_bitmap[r][cc]:
                     return False
         return True
 
@@ -672,6 +687,7 @@ def main():
     port = 9999
     role = "White"
     custom_setup = None
+
     if len(sys.argv) >= 2:
         host = sys.argv[1]
     if len(sys.argv) >= 3:
@@ -695,9 +711,10 @@ def main():
     
     s_file = sock.makefile('r')
     
-    # --- Handshake Start ---
-    msg = s_file.readline().strip()  # Greeting.
+    # Handshake
+    msg = s_file.readline().strip()  # e.g. "Connected to the server!"
     log(f"Server says: {msg}")
+
     if custom_setup and custom_setup.startswith("Setup "):
         send_message(sock, custom_setup)
         ack = s_file.readline().strip()  # Expecting "SETUP-ACK"
@@ -706,7 +723,7 @@ def main():
         send_message(sock, "OK")
     
     # Now receive the board setup.
-    msg = s_file.readline().strip()  # Board setup message.
+    msg = s_file.readline().strip()  # Board setup message (e.g. "Setup Wa2 ...")
     log(f"Server says: {msg}")
     if msg.startswith("Setup"):
         white_bitmap, black_bitmap = initialize_boards(msg)
@@ -715,65 +732,90 @@ def main():
     else:
         log("Unexpected board setup message. Exiting.")
         return
-    
-    # Continue with handshake.
+
     send_message(sock, "OK")
-    msg = s_file.readline().strip()  # Time message.
+
+    # The server tries to provide a time setting here, e.g. "30"
+    msg = s_file.readline().strip()
     log(f"Server says: {msg}")
+
+    # BUT we override it with 600:
+    GLOBAL_TIME = 600
+    log("Overriding server time with 600 seconds for this entire game.")
+
     send_message(sock, "OK")
-    msg = s_file.readline().strip()  # BEGIN message.
+
+    # Next line: "BEGIN"
+    msg = s_file.readline().strip()  # e.g., "BEGIN"
     log(f"Server says: {msg}")
-    msg = s_file.readline().strip()  # Role assignment.
+
+    msg = s_file.readline().strip()  # e.g., "Role Black"
     if msg.startswith("Role"):
         assigned_role = msg.split()[1]
         log(f"Assigned role: {assigned_role}")
         role = assigned_role
     else:
-        log("No role assignment from server; using default role.")
-    # --- Handshake End ---
-    
+        log("No explicit role assigned; using default role.")
+
     agent = AIAgent(role, white_bitmap, black_bitmap)
-    
+
     # Print the current evaluation of the board:
     agent.print_evaluation()
 
+    # Keep track of only the time the agent uses:
+    agent_time_left = GLOBAL_TIME
     move_count = 0
-    session_start = time.time()
-    
+
     while True:
-        if (role == "White" and move_count % 2 == 0) or (role == "Black" and move_count % 2 == 1):
-            move = agent.make_move(600, move_count)
-            log(f"Agent move: {move}")
-            send_message(sock, move)
-            if move.lower() == "exit":
+        # If it's our turn:
+        is_my_turn = ((role == "White" and move_count % 2 == 0)
+                      or (role == "Black" and move_count % 2 == 1))
+
+        if is_my_turn:
+            if agent_time_left <= 0:
+                log("Agent is out of computed move time!")
+                break
+
+            start_move_time = time.time()
+            chosen_move = agent.make_move(agent_time_left, move_count)
+            end_move_time = time.time()
+
+            move_elapsed = end_move_time - start_move_time
+            agent_time_left -= move_elapsed
+
+            log(f"[Agent {role}] used {move_elapsed:.2f}s, {agent_time_left:.2f}s left for the agent.")
+
+            send_message(sock, chosen_move)
+            if chosen_move.lower() == "exit":
                 log("Exiting game.")
                 break
             move_count += 1
         else:
-            # Start pondering while waiting for the opponent's move.
+            # Opponent's turn; read their move:
             agent.start_pondering()
             opp_move = s_file.readline().strip()
             agent.stop_pondering()
+
             if not opp_move or opp_move.lower() in ["exit", "gameover"]:
                 log("Game over. Exiting.")
                 break
+
             log(f"Opponent move: {opp_move}")
             if role == "White":
+                # Opponent is Black
                 execute_move(opp_move, black_bitmap, white_bitmap)
             else:
+                # Opponent is White
                 execute_move(opp_move, white_bitmap, black_bitmap)
-            
-            # Check win conditions after the opponent's move.
+
+            # Check for a winner
             winner = check_win_conditions(white_bitmap, black_bitmap)
             if winner:
                 log(f"Game over: {winner}")
                 send_message(sock, f"win: {winner}")
                 break
-            
             move_count += 1
     
-    elapsed = time.time() - session_start
-    log(f"Session ended. Elapsed time: {int(elapsed)} secs")
     sock.close()
 
 if __name__ == "__main__":

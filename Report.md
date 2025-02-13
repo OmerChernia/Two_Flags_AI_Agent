@@ -223,3 +223,66 @@
    Version Comparison:
    Different versions with variations in evaluation weights and search parameters were tested.
    Decisions on which version was better were based on a combination of deeper search results, improved evaluation accuracy, and overall better performance (e.g., higher win ratios or faster move generation).
+
+---
+
+**General Questions and Answers**
+
+1. **How was the development process conducted?**
+
+   The development process was as follows: when we learned about the assignment, we started working on the GUI and the basic interface for the chess game (movement of pieces, capturing, game legality). We worked on the server and client. In hindsight, it turns out we misunderstood this part, which forced us to address it later in the project. Afterward, when we learned the relevant material for the agent in class, we started researching how to implement the Minimax algorithm, bit boards, and Alpha-Beta pruning independently. We implemented these features gradually in our project.
+
+   We held several in-person meetings where we worked together for several hours to solve problems in the project, in addition to individual work, merging our progress into a unified version, and committing it to the repository. Towards the end, we discovered we misunderstood the protocol, and our agent relied heavily on helper classes in the project. This led us to start a new project from scratch (previous project git repository link: https://github.com/OmerChernia/CatchTheFlag_AI_Project), where we rebuilt the interface between the server and clients (agent or human player). By then, we had a relatively complete codebase in the second project, so we reused large portions of it until we achieved a state where our agent relied solely on the server’s output.
+
+2. **What general principles about the “Two Flags” game did you learn from the project?**
+
+   We found that “Two Flags” is an excellent game for a first artificial intelligence project. It incorporates several interesting elements from chess, which add complexity and interest to development. Initially, we thought it was very similar to checkers, but with more strategic depth. At first, our gameplay was quite poor, but over time, we became fairly skilled players.
+
+3. **What conclusions did you draw from the project?**
+
+   The main conclusion from the project is that we spent a significant portion of our time developing the environment rather than focusing on the agent itself. There were numerous bugs along the way, and we wish we could have concentrated primarily on the agent’s development. Additionally, we developed the agent in Python, a language considered relatively slow. If we had developed it in C++, for instance, the agent might have been able to search the tree deeper within a reasonable timeframe, making it a stronger agent.
+
+4. **What improvements do you see for the future?**
+
+   In terms of the course project, we believe it would be better to provide students with a ready-made server-client interface, requiring them to only implement the agent itself. This way, students can focus on improving the agent and implementing the functions taught in the course rather than wasting time (as happened to us) resolving issues related to the environment.
+
+---
+
+**Game Examples**
+
+1. **Example 1**
+
+   The board setup is as follows:
+
+   ![image](Report_files/Game_Example1_Setup.png)
+
+   Pawn Positions:
+
+   Black:
+
+   - Pawn at f6.
+   - Pawn at f7.
+   - Pawn at h6.
+
+   White:
+
+   - Pawn at g4.
+   - Pawn at f4.
+
+   Goal for the Agent (Black):
+
+   The black agent needs to maximize its chances of winning or, at the very least, prevent white from winning. In this situation, the black agent should sacrifice the pawn at f6 and move it to f5. in this case, the white pawn at g4 will have to capture the black pawn at f5, and the black pawn at h6 will be able to proceed to promotion.
+
+   any other move will result in a loss, as the white pawn at g4 will be able to capture the black pawn at f5, and the black pawn at h6 will be able to proceed to promotion.
+
+   ![image](Report_files/Game_Example1_Move1.png)
+
+   as we can see, the black pawn (agent) at f6 is sacrificed.
+
+   ![image](Report_files/Game_Example1_Move2.png)
+
+   black pawn at h6 is able to proceed to promotion.
+
+   ![image](Report_files/Game_Example1_Log.png)
+
+   the agent log is as follows.
