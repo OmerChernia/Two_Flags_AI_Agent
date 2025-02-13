@@ -43,7 +43,7 @@ def recv_msg(conn_file, stats):
 def start_server():
     host = '127.0.0.1'
     game_port = 9999       # game (player) connections port
-    spectator_port = 10000 # spectator (GUI) connection port
+    spectator_port = 10000 # spectator (GUI) connection portGui
     stats = {"bytes_read": 0, "bytes_written": 0}
     time_value = 30         # default time in minutes
 
