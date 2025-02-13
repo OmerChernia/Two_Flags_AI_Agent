@@ -428,11 +428,11 @@ class AIAgent:
         self.start_time = time.time()
 
         # DYNAMIC DEPTH SCHEDULING:
-        # For the first 10 moves of the entire game, search up to depth 4;
+        # For the first 10 moves of the entire game, search up to depth 8;
         if move_count < 10:
-            max_depth = 5
+            max_depth = 8
         else:
-            max_depth = 11
+            max_depth = 12
 
         moves = self._generate_legal_moves_for_role()
         if not moves:
