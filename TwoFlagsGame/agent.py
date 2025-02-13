@@ -4,7 +4,6 @@ import time
 import random
 import copy
 import math
-from client import initialize_boards  # Import the board setup parser
 
 def log(msg):
     print(msg)
@@ -210,6 +209,28 @@ weights = {
     "white_advancement": 30,
     "white_passed_pawn": 150
 }
+
+def initialize_boards(setup_msg):
+    """
+    Parse the setup message (e.g.
+    "Setup Wa2 Wb2 Wc2 Wd2 We2 Wf2 Wg2 Wh2 Ba7 Bb7 Bc7 Bd7 Be7 Bf7 Bg7 Bh7")
+    and create bitmaps for white and black pawns.
+    Each bitmap is an 8x8 matrix with boolean values: True indicates a pawn.
+    """
+    white_bitmap = [[False for _ in range(8)] for _ in range(8)]
+    black_bitmap = [[False for _ in range(8)] for _ in range(8)]
+    tokens = setup_msg.split()
+    for token in tokens[1:]:
+        if len(token) < 3:
+            continue 
+        color = token[0].upper()
+        pos = token[1:]
+        row, col = convert_coord(pos)
+        if color == 'W':
+            white_bitmap[row][col] = True
+        elif color == 'B':
+            black_bitmap[row][col] = True
+    return white_bitmap, black_bitmap
 
 def evaluate_board_dynamic(white_bitmap, black_bitmap, role):
     """
