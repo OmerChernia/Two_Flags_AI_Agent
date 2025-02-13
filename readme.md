@@ -85,6 +85,7 @@ This makes it suitable for experimenting with basic search algorithms, heuristic
    **Game will start after both players connect.**
 
    **Server will start the gui by default.**
+
    ![image](Readme_files/Gui_Main.png)
 
 ### 2. Playing from the Beginning Against the Agent
@@ -96,10 +97,13 @@ This makes it suitable for experimenting with basic search algorithms, heuristic
    ![image](Readme_files/Gui_Connection1.png)
 
 2. Next, connect a second player (which can be you as a human, or another instance of the agent). agent, run **Agent.exe** or
+
    ```bash
    python agent.py
    ```
+
    ![image](Readme_files/Gui_Connection2.png)
+
 3. The server will assign roles (e.g., "Role White" to the first connection, "Role Black" to the second). The game then begins.
 4. Each side alternates moves; the server passes those moves through to the other side.
 
@@ -157,17 +161,29 @@ Sometimes you'll also see lines about "transposition table hits" or "best line f
 There are two main ways to customize the initial placement of pieces:
 
 - Run the gui, and click "Setup" or "Custom Board Setup".
+
   ![image](Readme_files/Gui_Main.png)
+
 - In the setup window, click white button to place white pawns, just click on the square you want to place the pawn. same for black.
+
   ![image](Readme_files/Setup_Board.png)
+
 - After arranging everything, confirm or “Finish Setup.” The GUI will convert this board to a `Setup` string.
+
   ![image](Readme_files/Setup_Pawns.png)
+
 - click "Load Custom Board" button in the gui. you will get the setup string in a message box.
+
   ![image](Readme_files/Setup_Load_Message.png)
+
 - Then connect normally with two clients.
+
   ![image](Readme_files/Setup_Game_Start.png)
+
   You’ll see your arrangement in the server logs, and the game starts with the custom position.
+
   ![image](Readme_files/Setup_Load_Console.png)
+
   ![image](Readme_files/Setup_Game_Console.png)
 
 Be aware that if both sides attempt to specify different setups, the server may only accept the first one. Double-check your logs to confirm which setup was used.
